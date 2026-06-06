@@ -156,8 +156,8 @@ async function handleNegotiation({ product_id, buyer_offer, buyer_email, buyer_n
     const { publishOrder } = require('../mq/publisher');
     // Create the order with the agreed price
     const { rows: oRows } = await pool.query(
-      `INSERT INTO orders (buyer_name, buyer_email, notes, status)
-       VALUES ($1,$2,$3,'queued') RETURNING id, created_at`,
+      `INSERT INTO orders (buyer_name, buyer_email, notes, status, channel)
+       VALUES ($1,$2,$3,'queued','negotiation') RETURNING id, created_at`,
       [buyer_name || buyer_email, buyer_email, `Negotiated price: $${buyer_offer}/unit (list: $${list_price})`]
     );
     order_id = oRows[0].id;

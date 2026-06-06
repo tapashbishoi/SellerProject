@@ -39,6 +39,7 @@ async function initSchema() {
       -- Add new columns if upgrading an existing DB
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS failure_reason TEXT;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS mq_message_id  VARCHAR(100);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS channel        VARCHAR(30) DEFAULT 'api';
 
       CREATE TABLE IF NOT EXISTS negotiations (
         id              SERIAL PRIMARY KEY,

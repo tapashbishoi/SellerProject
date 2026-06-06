@@ -5,7 +5,7 @@ const { publishOrder } = require('../mq/publisher');
 
 // POST /api/orders/stage — buyer submits order → goes to RabbitMQ for validation
 router.post('/stage', async (req, res) => {
-  const { buyer_name, buyer_email, buyer_phone, notes, items } = req.body;
+  const { buyer_name, buyer_email, buyer_phone, notes, items, channel = 'api' } = req.body;
 
   if (!buyer_name || !items || !items.length)
     return res.status(400).json({ error: 'buyer_name and items[] are required' });
@@ -15,21 +15,18 @@ router.post('/stage', async (req, res) => {
       return res.status(400).json({ error: 'Each item needs product_id and quantity >= 1' });
   }
 
-  // Pre-create a "queued" order row so the buyer gets an ID immediately
   const { rows } = await pool.query(
-    `INSERT INTO orders (buyer_name, buyer_email, buyer_phone, notes, status)
-     VALUES ($1,$2,$3,$4,'queued') RETURNING id, created_at`,
-    [buyer_name, buyer_email, buyer_phone, notes]
+    `INSERT INTO orders (buyer_name, buyer_email, buyer_phone, notes, status, channel)
+     VALUES ($1,$2,$3,$4,'queued',$5) RETURNING id, created_at`,
+    [buyer_name, buyer_email, buyer_phone, notes, channel]
   );
   const stagedOrder = rows[0];
 
-  // Publish to RabbitMQ
   const messageId = await publishOrder({
     staged_order_id: stagedOrder.id,
     buyer_name, buyer_email, buyer_phone, notes, items,
   });
 
-  // Store the messageId back on the order row
   await pool.query(`UPDATE orders SET mq_message_id=$1 WHERE id=$2`, [messageId, stagedOrder.id]);
 
   res.status(202).json({
@@ -87,9 +84,10 @@ router.get('/:id', async (req, res) => {
   res.json(rows[0]);
 });
 
-// POST /api/orders — now routes through MQ (same as /stage)
+// POST /api/orders — routes through MQ, tagged by Referer (ui vs api)
 router.post('/', async (req, res) => {
   const { buyer_name, buyer_email, buyer_phone, notes, items } = req.body;
+  const channel = req.headers['x-source'] === 'ui' ? 'ui' : 'api';
 
   if (!buyer_name || !items || !items.length)
     return res.status(400).json({ error: 'buyer_name and items[] are required' });
@@ -99,11 +97,10 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Each item needs product_id and quantity >= 1' });
   }
 
-  // Create order row as queued
   const { rows } = await pool.query(
-    `INSERT INTO orders (buyer_name, buyer_email, buyer_phone, notes, status)
-     VALUES ($1,$2,$3,$4,'queued') RETURNING id, created_at`,
-    [buyer_name, buyer_email, buyer_phone, notes]
+    `INSERT INTO orders (buyer_name, buyer_email, buyer_phone, notes, status, channel)
+     VALUES ($1,$2,$3,$4,'queued',$5) RETURNING id, created_at`,
+    [buyer_name, buyer_email, buyer_phone, notes, channel]
   );
   const staged = rows[0];
 

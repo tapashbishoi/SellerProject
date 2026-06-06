@@ -75,12 +75,12 @@ async function getInventory(productId) {
   return rows;
 }
 
-async function stageOrder({ buyer_name, buyer_email, buyer_phone, notes, items }) {
-  // Create queued order row
+async function stageOrder({ buyer_name, buyer_email, buyer_phone, notes, items, channel = 'mcp' }) {
+  // Create queued order row — tagged with source channel
   const { rows } = await pool.query(
-    `INSERT INTO orders (buyer_name, buyer_email, buyer_phone, notes, status)
-     VALUES ($1,$2,$3,$4,'queued') RETURNING id, created_at`,
-    [buyer_name, buyer_email, buyer_phone, notes]
+    `INSERT INTO orders (buyer_name, buyer_email, buyer_phone, notes, status, channel)
+     VALUES ($1,$2,$3,$4,'queued',$5) RETURNING id, created_at`,
+    [buyer_name, buyer_email, buyer_phone, notes, channel]
   );
   const staged = rows[0];
 

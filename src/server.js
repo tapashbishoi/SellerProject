@@ -34,6 +34,7 @@ app.use('/api', requireApiKey);
 app.use('/api/products',  require('./routes/products'));
 app.use('/api/inventory', require('./routes/inventory'));
 app.use('/api/orders',    require('./routes/orders'));
+app.use('/api/analytics', require('./routes/analytics'));
 
 // Health check — shows DB + MQ status
 app.get('/api/health', async (req, res) => {
