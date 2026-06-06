@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: seller-agent
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: PORT
+        value: 3000

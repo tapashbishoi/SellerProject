@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seller Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; color: #333; }
+
+    header {
+      background: #1a73e8; color: #fff; padding: 16px 24px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    header h1 { font-size: 1.3rem; }
+    header span { font-size: 0.85rem; opacity: 0.85; margin-left: auto; }
+
+    nav { background: #fff; border-bottom: 2px solid #e0e0e0; display: flex; gap: 0; }
+    nav button {
+      background: none; border: none; padding: 14px 28px; font-size: 0.95rem;
+      cursor: pointer; border-bottom: 3px solid transparent; color: #555;
+      transition: all 0.2s;
+    }
+    nav button.active { color: #1a73e8; border-bottom-color: #1a73e8; font-weight: 600; }
+    nav button:hover { background: #f5f5f5; }
+
+    .tab-content { display: none; padding: 24px; }
+    .tab-content.active { display: block; }
+
+    .card { background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .card h2 { font-size: 1.1rem; margin-bottom: 16px; color: #1a73e8; }
+
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 16px; margin-bottom: 24px; }
+    .stat-box { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); text-align: center; }
+    .stat-box .num { font-size: 2rem; font-weight: 700; color: #1a73e8; }
+    .stat-box .lbl { font-size: 0.85rem; color: #777; margin-top: 4px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th { background: #f5f7fa; text-align: left; padding: 10px 12px; font-weight: 600; color: #555; border-bottom: 1px solid #e0e0e0; }
+    td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+    tr:hover td { background: #fafbff; }
+
+    .badge {
+      display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600;
+    }
+    .badge-in_stock    { background: #e6f4ea; color: #2e7d32; }
+    .badge-low_stock   { background: #fff3e0; color: #e65100; }
+    .badge-out_of_stock{ background: #fce8e6; color: #c62828; }
+    .badge-pending     { background: #e8f0fe; color: #1557b0; }
+    .badge-confirmed   { background: #e6f4ea; color: #2e7d32; }
+    .badge-shipped     { background: #f3e8fd; color: #6a1b9a; }
+    .badge-delivered   { background: #e6f4ea; color: #1b5e20; }
+    .badge-cancelled   { background: #f5f5f5; color: #757575; }
+
+    .btn {
+      padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: #1a73e8; color: #fff; }
+    .btn-success { background: #2e7d32; color: #fff; }
+    .btn-danger  { background: #c62828; color: #fff; }
+    .btn-sm { padding: 5px 10px; font-size: 0.8rem; }
+
+    .form-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .form-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 160px; }
+    .form-group label { font-size: 0.82rem; color: #555; font-weight: 600; }
+    .form-group input, .form-group select, .form-group textarea {
+      border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; font-size: 0.9rem;
+    }
+    .form-group input:focus, .form-group select:focus { outline: none; border-color: #1a73e8; }
+
+    .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .section-header h2 { font-size: 1.1rem; color: #333; }
+
+    #toast {
+      position: fixed; bottom: 24px; right: 24px; background: #323232; color: #fff;
+      padding: 12px 20px; border-radius: 8px; font-size: 0.9rem; display: none; z-index: 9999;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    #toast.success { background: #2e7d32; }
+    #toast.error   { background: #c62828; }
+
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+      z-index: 1000; align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: #fff; border-radius: 12px; padding: 28px; width: 520px; max-width: 95vw;
+      max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    }
+    .modal h3 { margin-bottom: 18px; color: #1a73e8; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+    .order-items-builder { border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    .item-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 8px; }
+    .item-row .form-group { margin-bottom: 0; }
+
+    .qty-ctrl { display: flex; align-items: center; gap: 8px; }
+    .qty-ctrl input { width: 80px; text-align: center; }
+
+    .search-bar { display: flex; gap: 10px; margin-bottom: 16px; }
+    .search-bar input { flex: 1; border: 1px solid #ddd; border-radius: 6px; padding: 8px 12px; font-size: 0.9rem; }
+
+    @media (max-width: 600px) {
+      nav button { padding: 12px 14px; font-size: 0.85rem; }
+      .tab-content { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>📦</div>
+  <h1>Stationery Seller Dashboard</h1>
+  <span id="header-date"></span>
+</header>
+
+<nav>
+  <button class="active" onclick="switchTab('dashboard')">Dashboard</button>
+  <button onclick="switchTab('catalogue')">Catalogue</button>
+  <button onclick="switchTab('inventory')">Inventory</button>
+  <button onclick="switchTab('orders')">Orders</button>
+  <button onclick="switchTab('api')">API Docs</button>
+</nav>
+
+<!-- DASHBOARD -->
+<div id="tab-dashboard" class="tab-content active">
+  <div class="grid-3">
+    <div class="stat-box"><div class="num" id="stat-products">—</div><div class="lbl">Total Products</div></div>
+    <div class="stat-box"><div class="num" id="stat-orders">—</div><div class="lbl">Total Orders</div></div>
+    <div class="stat-box"><div class="num" id="stat-revenue">—</div><div class="lbl">Total Revenue ($)</div></div>
+    <div class="stat-box"><div class="num" id="stat-low">—</div><div class="lbl">Low / Out of Stock</div></div>
+  </div>
+  <div class="card">
+    <h2>Recent Orders</h2>
+    <table>
+      <thead><tr><th>#</th><th>Buyer</th><th>Items</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+      <tbody id="dash-orders"></tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h2>Low Stock Alerts</h2>
+    <table>
+      <thead><tr><th>Product</th><th>Category</th><th>Stock</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody id="dash-lowstock"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- CATALOGUE -->
+<div id="tab-catalogue" class="tab-content">
+  <div class="section-header">
+    <h2>Product Catalogue</h2>
+    <button class="btn btn-primary" onclick="openAddProduct()">+ Add Product</button>
+  </div>
+  <div class="search-bar">
+    <input id="cat-search" placeholder="Search by name…" oninput="loadCatalogue()" />
+    <select id="cat-category" onchange="loadCatalogue()">
+      <option value="">All Categories</option>
+      <option>Pen</option><option>Pencil</option><option>Notebook</option>
+      <option>Eraser</option><option>Ruler</option><option>Stapler</option>
+      <option>File</option><option>Other</option>
+    </select>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table>
+      <thead><tr><th>#</th><th>Name</th><th>Category</th><th>Unit</th><th>Price ($)</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="catalogue-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- INVENTORY -->
+<div id="tab-inventory" class="tab-content">
+  <div class="section-header">
+    <h2>Inventory Management</h2>
+    <button class="btn btn-success" onclick="loadInventory()">↻ Refresh</button>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table>
+      <thead><tr><th>Product</th><th>Category</th><th>Price ($)</th><th>Stock Qty</th><th>Low Threshold</th><th>Status</th><th>Last Updated</th><th>Actions</th></tr></thead>
+      <tbody id="inventory-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ORDERS -->
+<div id="tab-orders" class="tab-content">
+  <div class="section-header">
+    <h2>Orders</h2>
+    <button class="btn btn-primary" onclick="openPlaceOrder()">+ Place Order</button>
+  </div>
+  <div class="search-bar">
+    <select id="order-filter" onchange="loadOrders()">
+      <option value="">All Statuses</option>
+      <option>pending</option><option>confirmed</option>
+      <option>shipped</option><option>delivered</option><option>cancelled</option>
+    </select>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table>
+      <thead><tr><th>#</th><th>Buyer</th><th>Contact</th><th>Items</th><th>Total ($)</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+      <tbody id="orders-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- API DOCS -->
+<div id="tab-api" class="tab-content">
+  <div class="card">
+    <h2>API Reference</h2>
+    <p style="margin-bottom:16px;color:#555;">Base URL: <code id="api-base"></code></p>
+    <table>
+      <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><b>GET</b></td><td><code>/api/products</code></td><td>List catalogue (params: category, search)</td></tr>
+        <tr><td><b>GET</b></td><td><code>/api/products/:id</code></td><td>Get single product with stock status</td></tr>
+        <tr><td><b>POST</b></td><td><code>/api/products</code></td><td>Add new product</td></tr>
+        <tr><td><b>PUT</b></td><td><code>/api/products/:id</code></td><td>Update product details</td></tr>
+        <tr><td><b>DELETE</b></td><td><code>/api/products/:id</code></td><td>Delete product</td></tr>
+        <tr><td><b>GET</b></td><td><code>/api/inventory</code></td><td>Full inventory list</td></tr>
+        <tr><td><b>PATCH</b></td><td><code>/api/inventory/:productId</code></td><td>Set stock qty / threshold</td></tr>
+        <tr><td><b>POST</b></td><td><code>/api/inventory/:productId/restock</code></td><td>Add stock (restock)</td></tr>
+        <tr><td><b>GET</b></td><td><code>/api/orders</code></td><td>List all orders (param: status)</td></tr>
+        <tr><td><b>GET</b></td><td><code>/api/orders/:id</code></td><td>Get order details</td></tr>
+        <tr><td><b>POST</b></td><td><code>/api/orders</code></td><td>Place order (auto-deducts inventory)</td></tr>
+        <tr><td><b>PATCH</b></td><td><code>/api/orders/:id/status</code></td><td>Update order status (cancel restores stock)</td></tr>
+      </tbody>
+    </table>
+    <details style="margin-top:20px;">
+      <summary style="cursor:pointer;font-weight:600;color:#1a73e8;">Example: Place an order (POST /api/orders)</summary>
+      <pre style="background:#f5f7fa;padding:14px;border-radius:8px;margin-top:10px;font-size:0.85rem;overflow-x:auto;">{
+  "buyer_name": "Ravi Kumar",
+  "buyer_email": "ravi@example.com",
+  "buyer_phone": "9876543210",
+  "notes": "Urgent delivery",
+  "items": [
+    { "product_id": 1, "quantity": 10 },
+    { "product_id": 2, "quantity": 5 }
+  ]
+}</pre>
+    </details>
+  </div>
+</div>
+
+<!-- MODALS -->
+<div class="modal-overlay" id="modal-product">
+  <div class="modal">
+    <h3 id="modal-product-title">Add Product</h3>
+    <div class="form-row">
+      <div class="form-group"><label>Name *</label><input id="p-name" placeholder="e.g. Blue Pen" /></div>
+      <div class="form-group"><label>Category</label>
+        <select id="p-category">
+          <option value="">Select…</option>
+          <option>Pen</option><option>Pencil</option><option>Notebook</option>
+          <option>Eraser</option><option>Ruler</option><option>Stapler</option>
+          <option>File</option><option>Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Price ($) *</label><input id="p-price" type="number" min="0" step="0.01" /></div>
+      <div class="form-group"><label>Unit</label><input id="p-unit" placeholder="piece / box / dozen" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Initial Stock</label><input id="p-qty" type="number" min="0" value="0" /></div>
+      <div class="form-group"><label>Low Stock Alert At</label><input id="p-threshold" type="number" min="0" value="10" /></div>
+    </div>
+    <div class="form-group" style="margin-bottom:12px;">
+      <label>Description</label>
+      <textarea id="p-desc" rows="2" style="resize:vertical;"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-product')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveProduct()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-stock">
+  <div class="modal">
+    <h3>Update Stock — <span id="stock-product-name"></span></h3>
+    <input type="hidden" id="stock-product-id" />
+    <div class="form-row">
+      <div class="form-group">
+        <label>Set Quantity To</label>
+        <input id="stock-qty" type="number" min="0" placeholder="New quantity" />
+      </div>
+      <div class="form-group">
+        <label>Or Add Stock</label>
+        <input id="stock-add" type="number" min="1" placeholder="Amount to add" />
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:12px;">
+      <label>Low Stock Threshold</label>
+      <input id="stock-threshold" type="number" min="0" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-stock')">Cancel</button>
+      <button class="btn btn-success" onclick="saveStock()">Update</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-order">
+  <div class="modal">
+    <h3>Place New Order</h3>
+    <div class="form-row">
+      <div class="form-group"><label>Buyer Name *</label><input id="o-name" /></div>
+      <div class="form-group"><label>Email</label><input id="o-email" type="email" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Phone</label><input id="o-phone" /></div>
+      <div class="form-group"><label>Notes</label><input id="o-notes" /></div>
+    </div>
+    <div class="order-items-builder">
+      <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
+        <b>Order Items</b>
+        <button class="btn btn-sm btn-primary" onclick="addItemRow()">+ Add Item</button>
+      </div>
+      <div id="order-items-container"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-order')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitOrder()">Place Order</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-order-detail">
+  <div class="modal">
+    <h3>Order #<span id="od-id"></span></h3>
+    <div id="od-body"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-order-detail')">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const API = window.location.origin + '/api';
+document.getElementById('api-base').textContent = API;
+document.getElementById('header-date').textContent = new Date().toLocaleDateString('en-IN', { dateStyle: 'long' });
+
+let productCache = [];
+
+// ── TAB SWITCHING ─────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.currentTarget.classList.add('active');
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'catalogue') loadCatalogue();
+  if (name === 'inventory') loadInventory();
+  if (name === 'orders')    loadOrders();
+}
+
+// ── TOAST ─────────────────────────────────────────────────────
+function toast(msg, type='success') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = type;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 3000);
+}
+
+// ── MODAL ─────────────────────────────────────────────────────
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ── UTILS ─────────────────────────────────────────────────────
+function badge(status) {
+  return `<span class="badge badge-${status}">${status.replace('_',' ')}</span>`;
+}
+function fmt(n) { return parseFloat(n || 0).toLocaleString('en-US'); }
+function fmtDate(d) { return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }); }
+
+// ── DASHBOARD ─────────────────────────────────────────────────
+async function loadDashboard() {
+  const [prods, orders, inv] = await Promise.all([
+    fetch(`${API}/products`).then(r => r.json()),
+    fetch(`${API}/orders`).then(r => r.json()),
+    fetch(`${API}/inventory`).then(r => r.json()),
+  ]);
+
+  document.getElementById('stat-products').textContent = prods.length;
+  document.getElementById('stat-orders').textContent = orders.length;
+  const revenue = orders.filter(o => o.status !== 'cancelled').reduce((s, o) => s + parseFloat(o.total_amount || 0), 0);
+  document.getElementById('stat-revenue').textContent = '$' + fmt(revenue);
+  const alerts = inv.filter(i => i.stock_status !== 'in_stock');
+  document.getElementById('stat-low').textContent = alerts.length;
+
+  // Recent 10 orders
+  const tbody = document.getElementById('dash-orders');
+  tbody.innerHTML = orders.slice(0, 10).map(o => `
+    <tr>
+      <td>#${o.id}</td>
+      <td>${o.buyer_name}</td>
+      <td>${(o.items||[]).filter(Boolean).length} item(s)</td>
+      <td>$${fmt(o.total_amount)}</td>
+      <td>${badge(o.status)}</td>
+      <td>${fmtDate(o.created_at)}</td>
+    </tr>`).join('');
+
+  // Low stock
+  const ls = document.getElementById('dash-lowstock');
+  ls.innerHTML = alerts.map(i => `
+    <tr>
+      <td>${i.name}</td>
+      <td>${i.category || '—'}</td>
+      <td>${i.quantity}</td>
+      <td>${badge(i.stock_status)}</td>
+      <td><button class="btn btn-sm btn-success" onclick="openStockModal(${i.product_id},'${i.name}',${i.quantity},${i.low_stock_threshold})">Restock</button></td>
+    </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;color:#888;padding:20px;">All products in stock ✓</td></tr>';
+}
+
+// ── CATALOGUE ─────────────────────────────────────────────────
+async function loadCatalogue() {
+  const search = document.getElementById('cat-search').value;
+  const cat    = document.getElementById('cat-category').value;
+  let url = `${API}/products?`;
+  if (search) url += `search=${encodeURIComponent(search)}&`;
+  if (cat)    url += `category=${encodeURIComponent(cat)}`;
+  const prods = await fetch(url).then(r => r.json());
+  productCache = prods;
+  const tbody = document.getElementById('catalogue-body');
+  tbody.innerHTML = prods.map(p => `
+    <tr>
+      <td>${p.id}</td>
+      <td><b>${p.name}</b></td>
+      <td>${p.category || '—'}</td>
+      <td>${p.unit}</td>
+      <td>$${fmt(p.price)}</td>
+      <td>${p.quantity ?? '—'}</td>
+      <td>${badge(p.stock_status || 'out_of_stock')}</td>
+      <td>
+        <button class="btn btn-sm btn-primary" onclick="openEditProduct(${p.id})">Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteProduct(${p.id},'${p.name}')">Del</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;padding:20px;color:#888;">No products found</td></tr>';
+}
+
+// ── ADD / EDIT PRODUCT ────────────────────────────────────────
+let editingProductId = null;
+function openAddProduct() {
+  editingProductId = null;
+  ['p-name','p-desc','p-price','p-unit','p-qty','p-threshold'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('p-category').value = '';
+  document.getElementById('p-qty').value = 0;
+  document.getElementById('p-threshold').value = 10;
+  document.getElementById('modal-product-title').textContent = 'Add Product';
+  openModal('modal-product');
+}
+
+async function openEditProduct(id) {
+  const p = await fetch(`${API}/products/${id}`).then(r => r.json());
+  editingProductId = id;
+  document.getElementById('p-name').value = p.name;
+  document.getElementById('p-desc').value = p.description || '';
+  document.getElementById('p-category').value = p.category || '';
+  document.getElementById('p-price').value = p.price;
+  document.getElementById('p-unit').value = p.unit;
+  document.getElementById('p-qty').value = p.quantity;
+  document.getElementById('p-threshold').value = p.low_stock_threshold;
+  document.getElementById('modal-product-title').textContent = 'Edit Product';
+  openModal('modal-product');
+}
+
+async function saveProduct() {
+  const body = {
+    name: document.getElementById('p-name').value.trim(),
+    description: document.getElementById('p-desc').value.trim(),
+    category: document.getElementById('p-category').value,
+    price: document.getElementById('p-price').value,
+    unit: document.getElementById('p-unit').value || 'piece',
+    initial_quantity: parseInt(document.getElementById('p-qty').value) || 0,
+    low_stock_threshold: parseInt(document.getElementById('p-threshold').value) || 10,
+  };
+  if (!body.name || !body.price) return toast('Name and price are required', 'error');
+
+  const url    = editingProductId ? `${API}/products/${editingProductId}` : `${API}/products`;
+  const method = editingProductId ? 'PUT' : 'POST';
+  const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) { const e = await res.json(); return toast(e.error, 'error'); }
+  toast(editingProductId ? 'Product updated' : 'Product added');
+  closeModal('modal-product');
+  loadCatalogue();
+}
+
+async function deleteProduct(id, name) {
+  if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+  await fetch(`${API}/products/${id}`, { method: 'DELETE' });
+  toast('Product deleted');
+  loadCatalogue();
+}
+
+// ── INVENTORY ─────────────────────────────────────────────────
+async function loadInventory() {
+  const inv = await fetch(`${API}/inventory`).then(r => r.json());
+  productCache = inv;
+  const tbody = document.getElementById('inventory-body');
+  tbody.innerHTML = inv.map(i => `
+    <tr>
+      <td><b>${i.name}</b></td>
+      <td>${i.category || '—'}</td>
+      <td>$${fmt(i.price)}</td>
+      <td><b style="font-size:1.1rem;">${i.quantity}</b></td>
+      <td>${i.low_stock_threshold}</td>
+      <td>${badge(i.stock_status)}</td>
+      <td style="font-size:0.8rem;color:#888;">${fmtDate(i.updated_at)}</td>
+      <td><button class="btn btn-sm btn-success" onclick="openStockModal(${i.product_id},'${i.name}',${i.quantity},${i.low_stock_threshold})">Update Stock</button></td>
+    </tr>`).join('');
+}
+
+function openStockModal(productId, name, qty, threshold) {
+  document.getElementById('stock-product-id').value = productId;
+  document.getElementById('stock-product-name').textContent = name;
+  document.getElementById('stock-qty').value = '';
+  document.getElementById('stock-add').value = '';
+  document.getElementById('stock-threshold').value = threshold;
+  openModal('modal-stock');
+}
+
+async function saveStock() {
+  const productId = document.getElementById('stock-product-id').value;
+  const qty       = document.getElementById('stock-qty').value;
+  const add       = document.getElementById('stock-add').value;
+  const threshold = document.getElementById('stock-threshold').value;
+
+  if (add && parseInt(add) > 0) {
+    const res = await fetch(`${API}/inventory/${productId}/restock`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ add_quantity: parseInt(add) })
+    });
+    if (!res.ok) { const e = await res.json(); return toast(e.error, 'error'); }
+  } else {
+    const body = {};
+    if (qty !== '') body.quantity = parseInt(qty);
+    if (threshold !== '') body.low_stock_threshold = parseInt(threshold);
+    if (!Object.keys(body).length) return toast('Enter a quantity or amount to add', 'error');
+    const res = await fetch(`${API}/inventory/${productId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) { const e = await res.json(); return toast(e.error, 'error'); }
+  }
+
+  toast('Stock updated');
+  closeModal('modal-stock');
+  loadInventory();
+  // Refresh dashboard alert count silently
+  fetch(`${API}/inventory`);
+}
+
+// ── ORDERS ────────────────────────────────────────────────────
+async function loadOrders() {
+  const status = document.getElementById('order-filter').value;
+  let url = `${API}/orders`;
+  if (status) url += `?status=${status}`;
+  const orders = await fetch(url).then(r => r.json());
+  const tbody = document.getElementById('orders-body');
+  tbody.innerHTML = orders.map(o => {
+    const items = (o.items || []).filter(Boolean);
+    return `<tr>
+      <td>#${o.id}</td>
+      <td><b>${o.buyer_name}</b></td>
+      <td style="font-size:0.82rem;">${o.buyer_email || ''}${o.buyer_phone ? '<br>'+o.buyer_phone : ''}</td>
+      <td>${items.length} item(s)</td>
+      <td>$${fmt(o.total_amount)}</td>
+      <td>${badge(o.status)}</td>
+      <td style="font-size:0.82rem;">${fmtDate(o.created_at)}</td>
+      <td>
+        <button class="btn btn-sm btn-primary" onclick="viewOrder(${o.id})">View</button>
+        ${o.status !== 'cancelled' && o.status !== 'delivered' ? `
+          <select class="btn btn-sm" style="margin-top:4px;" onchange="changeStatus(${o.id}, this.value, this)">
+            <option value="">Change…</option>
+            <option>confirmed</option><option>shipped</option>
+            <option>delivered</option><option>cancelled</option>
+          </select>` : ''}
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" style="text-align:center;padding:20px;color:#888;">No orders found</td></tr>';
+}
+
+async function changeStatus(id, status, el) {
+  if (!status) return;
+  if (!confirm(`Mark order #${id} as "${status}"?`)) { el.value = ''; return; }
+  const res = await fetch(`${API}/orders/${id}/status`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status })
+  });
+  if (!res.ok) { const e = await res.json(); return toast(e.error, 'error'); }
+  toast(`Order #${id} marked as ${status}`);
+  loadOrders();
+}
+
+async function viewOrder(id) {
+  const o = await fetch(`${API}/orders/${id}`).then(r => r.json());
+  document.getElementById('od-id').textContent = o.id;
+  const items = (o.items || []).filter(Boolean);
+  document.getElementById('od-body').innerHTML = `
+    <p><b>Buyer:</b> ${o.buyer_name}</p>
+    <p><b>Email:</b> ${o.buyer_email || '—'} &nbsp; <b>Phone:</b> ${o.buyer_phone || '—'}</p>
+    <p style="margin-top:6px;"><b>Status:</b> ${badge(o.status)} &nbsp; <b>Date:</b> ${fmtDate(o.created_at)}</p>
+    ${o.notes ? `<p><b>Notes:</b> ${o.notes}</p>` : ''}
+    <table style="margin-top:14px;">
+      <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
+      <tbody>
+        ${items.map(i => `<tr><td>${i.product_name}</td><td>${i.quantity}</td><td>$${fmt(i.unit_price)}</td><td>$${fmt(i.subtotal)}</td></tr>`).join('')}
+        <tr style="font-weight:700;"><td colspan="3" style="text-align:right;">Total</td><td>$${fmt(o.total_amount)}</td></tr>
+      </tbody>
+    </table>`;
+  openModal('modal-order-detail');
+}
+
+// ── PLACE ORDER ───────────────────────────────────────────────
+async function openPlaceOrder() {
+  ['o-name','o-email','o-phone','o-notes'].forEach(id => document.getElementById(id).value = '');
+  // Refresh product cache
+  productCache = await fetch(`${API}/products`).then(r => r.json());
+  document.getElementById('order-items-container').innerHTML = '';
+  addItemRow();
+  openModal('modal-order');
+}
+
+function addItemRow() {
+  const container = document.getElementById('order-items-container');
+  const idx = container.children.length;
+  const opts = productCache.map(p =>
+    `<option value="${p.id}" data-stock="${p.quantity}">${p.name} (Stock: ${p.quantity}) — $${fmt(p.price)}</option>`
+  ).join('');
+  const row = document.createElement('div');
+  row.className = 'item-row';
+  row.innerHTML = `
+    <div class="form-group" style="flex:2;">
+      <label>Product</label>
+      <select class="item-product">${opts}</select>
+    </div>
+    <div class="form-group" style="flex:1;">
+      <label>Qty</label>
+      <input class="item-qty" type="number" min="1" value="1" />
+    </div>
+    <button class="btn btn-danger btn-sm" style="margin-bottom:2px;" onclick="this.parentElement.remove()">✕</button>`;
+  container.appendChild(row);
+}
+
+async function submitOrder() {
+  const buyer_name  = document.getElementById('o-name').value.trim();
+  const buyer_email = document.getElementById('o-email').value.trim();
+  const buyer_phone = document.getElementById('o-phone').value.trim();
+  const notes       = document.getElementById('o-notes').value.trim();
+  if (!buyer_name) return toast('Buyer name is required', 'error');
+
+  const rows = document.querySelectorAll('#order-items-container .item-row');
+  const items = [];
+  for (const row of rows) {
+    const product_id = parseInt(row.querySelector('.item-product').value);
+    const quantity   = parseInt(row.querySelector('.item-qty').value);
+    if (!product_id || !quantity || quantity < 1) return toast('Check item quantities', 'error');
+    items.push({ product_id, quantity });
+  }
+  if (!items.length) return toast('Add at least one item', 'error');
+
+  const res = await fetch(`${API}/orders`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ buyer_name, buyer_email, buyer_phone, notes, items })
+  });
+  const data = await res.json();
+  if (!res.ok) return toast(data.error, 'error');
+  toast(`Order #${data.id} placed successfully!`);
+  closeModal('modal-order');
+  loadOrders();
+}
+
+// ── INIT ──────────────────────────────────────────────────────
+loadDashboard();
+</script>
+</body>
+</html>

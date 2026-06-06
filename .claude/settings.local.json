@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Remove-Item \"C:\\\\Users\\\\tapas\\\\OneDrive\\\\Documents\\\\AI DEMO\\\\seller agent\\\\requirements.txt\")",
+      "Bash(rm \"/mnt/c/Users/tapas/OneDrive/Documents/AI DEMO/seller agent/requirements.txt\")",
+      "PowerShell(\\(\\(Get-Content \"C:\\\\Users\\\\tapas\\\\OneDrive\\\\Documents\\\\AI DEMO\\\\seller agent\\\\public\\\\index.html\"\\) -replace '₹', '$'\\) | Set-Content \"C:\\\\Users\\\\tapas\\\\OneDrive\\\\Documents\\\\AI DEMO\\\\seller agent\\\\public\\\\index.html\")",
+      "Bash(gh auth *)",
+      "PowerShell(gh auth status 2>&1)"
+    ]
+  }
+}
