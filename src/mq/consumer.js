@@ -46,7 +46,8 @@ async function processOrder(orderData) {
     let totalAmount = 0;
     for (const item of items) {
       const { rows: p } = await client.query(`SELECT price FROM products WHERE id=$1`, [item.product_id]);
-      const unitPrice = parseFloat(p[0].price);
+      // Use negotiated_price if provided (from price negotiation), else use list price
+      const unitPrice = item.negotiated_price ? parseFloat(item.negotiated_price) : parseFloat(p[0].price);
       totalAmount += unitPrice * item.quantity;
 
       await client.query(

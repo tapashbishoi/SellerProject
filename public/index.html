@@ -202,7 +202,7 @@
   </div>
   <div class="card" style="padding:0;overflow:hidden;">
     <table>
-      <thead><tr><th>#</th><th>Buyer</th><th>Contact</th><th>Items</th><th>Total ($)</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+      <thead><tr><th>#</th><th>Buyer</th><th>Contact</th><th>Items</th><th>Total ($)</th><th>Status</th><th>Channel</th><th>Date</th><th>Actions</th></tr></thead>
       <tbody id="orders-body"></tbody>
     </table>
   </div>
@@ -618,6 +618,9 @@ async function loadOrders() {
   if (status) url += `?status=${status}`;
   const orders = await fetch(url, {headers:H}).then(r => r.json());
   const tbody = document.getElementById('orders-body');
+  const chColor = { ui:'#1a73e8', api:'#34a853', mcp:'#9c27b0', negotiation:'#ff6d00' };
+  const chLabel = { ui:'UI', api:'API', mcp:'🤖 MCP', negotiation:'🤝 Negotiation' };
+  const chBadge = c => `<span style="padding:2px 7px;border-radius:10px;font-size:0.75rem;font-weight:600;background:${chColor[c]||'#eee'}22;color:${chColor[c]||'#555'};border:1px solid ${chColor[c]||'#ddd'}44">${chLabel[c]||c||'—'}</span>`;
   tbody.innerHTML = orders.map(o => {
     const items = (o.items || []).filter(Boolean);
     return `<tr>
@@ -627,6 +630,7 @@ async function loadOrders() {
       <td>${items.length} item(s)</td>
       <td>$${fmt(o.total_amount)}</td>
       <td>${badge(o.status)}</td>
+      <td>${chBadge(o.channel)}</td>
       <td style="font-size:0.82rem;">${fmtDate(o.created_at)}</td>
       <td>
         <button class="btn btn-sm btn-primary" onclick="viewOrder(${o.id})">View</button>
@@ -638,7 +642,7 @@ async function loadOrders() {
           </select>` : ''}
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="8" style="text-align:center;padding:20px;color:#888;">No orders found</td></tr>';
+  }).join('') || '<tr><td colspan="9" style="text-align:center;padding:20px;color:#888;">No orders found</td></tr>';
 }
 
 async function changeStatus(id, status, el) {
@@ -657,11 +661,14 @@ async function viewOrder(id) {
   const o = await fetch(`${API}/orders/${id}`, {headers:H}).then(r => r.json());
   document.getElementById('od-id').textContent = o.id;
   const items = (o.items || []).filter(Boolean);
+  const chColors = { ui:'#1a73e8', api:'#34a853', mcp:'#9c27b0', negotiation:'#ff6d00' };
+  const chLabels = { ui:'🖥️ Dashboard UI', api:'🔌 Direct API', mcp:'🤖 MCP/AI Agent', negotiation:'🤝 AI Negotiation' };
+  const chBadge  = c => `<span style="padding:2px 10px;border-radius:12px;font-size:0.8rem;font-weight:600;background:${chColors[c]||'#eee'}22;color:${chColors[c]||'#555'}">${chLabels[c]||c||'unknown'}</span>`;
   document.getElementById('od-body').innerHTML = `
     <p><b>Buyer:</b> ${o.buyer_name}</p>
     <p><b>Email:</b> ${o.buyer_email || '—'} &nbsp; <b>Phone:</b> ${o.buyer_phone || '—'}</p>
-    <p style="margin-top:6px;"><b>Status:</b> ${badge(o.status)} &nbsp; <b>Date:</b> ${fmtDate(o.created_at)}</p>
-    ${o.notes ? `<p><b>Notes:</b> ${o.notes}</p>` : ''}
+    <p style="margin-top:6px;"><b>Status:</b> ${badge(o.status)} &nbsp; <b>Channel:</b> ${chBadge(o.channel)} &nbsp; <b>Date:</b> ${fmtDate(o.created_at)}</p>
+    ${o.notes ? `<p style="margin-top:4px;"><b>Notes:</b> ${o.notes}</p>` : ''}
     <table style="margin-top:14px;">
       <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
       <tbody>
