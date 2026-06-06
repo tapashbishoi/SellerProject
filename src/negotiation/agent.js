@@ -2,7 +2,8 @@ require('dotenv').config();
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const pool = require('../db');
 
-const PRICE_FLOOR_PCT = parseFloat(process.env.PRICE_FLOOR_PCT || '0.70'); // 70% of list price
+const PRICE_FLOOR_PCT      = parseFloat(process.env.PRICE_FLOOR_PCT      || '0.70'); // 70% — negotiable floor
+const PRICE_HARD_REJECT_PCT = parseFloat(process.env.PRICE_HARD_REJECT_PCT || '0.60'); // 60% — instant reject, no counter
 
 let gemini = null;
 function getGemini() {
@@ -95,8 +96,38 @@ async function handleNegotiation({ product_id, buyer_offer, buyer_email, buyer_n
     };
   }
 
-  const list_price  = parseFloat(product.price);
-  const floor_price = parseFloat((list_price * PRICE_FLOOR_PCT).toFixed(2));
+  const list_price       = parseFloat(product.price);
+  const floor_price      = parseFloat((list_price * PRICE_FLOOR_PCT).toFixed(2));
+  const hard_reject_price = parseFloat((list_price * PRICE_HARD_REJECT_PCT).toFixed(2));
+
+  // Hard reject — offer is so low we won't even counter
+  if (buyer_offer < hard_reject_price) {
+    const { rows } = await pool.query(
+      `INSERT INTO negotiations
+         (product_id, buyer_email, buyer_name, quantity, list_price, floor_price,
+          buyer_offer, counter_offer, status, round, ai_reasoning, ai_message)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,'rejected',1,$8,$9) RETURNING id`,
+      [
+        product_id, buyer_email, buyer_name, quantity, list_price, floor_price, buyer_offer,
+        `Offer of $${buyer_offer} is below hard reject threshold of $${hard_reject_price} (${PRICE_HARD_REJECT_PCT * 100}% of list price).`,
+        `We appreciate your interest in ${product.name}, but your offer of $${buyer_offer}/unit is significantly below our minimum acceptable price. Our list price is $${list_price}/unit. We are unable to accept or counter this offer. Please consider our list price or reach out to discuss volume-based arrangements.`,
+      ]
+    );
+    return {
+      negotiation_id: rows[0].id,
+      status:         'rejected',
+      round:          1,
+      product:        product.name,
+      list_price,
+      floor_price,
+      your_offer:     buyer_offer,
+      counter_offer:  null,
+      agreed_price:   null,
+      message:        `Your offer of $${buyer_offer}/unit is too far below our minimum price of $${hard_reject_price}/unit. We cannot proceed with this negotiation. Please submit a new offer closer to the list price of $${list_price}/unit.`,
+      order_id:       null,
+      next_steps:     'Negotiation closed. Start a new negotiation with a higher offer.',
+    };
+  }
 
   // Load buyer history
   const buyer_history = await getBuyerHistory(buyer_email);

@@ -256,6 +256,34 @@
     <h2>Last 30 Days — Orders by Channel</h2>
     <div id="daily-trend"></div>
   </div>
+
+  <!-- Negotiation history -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h2>🤝 Negotiation History</h2>
+      <div style="display:flex;gap:8px;">
+        <select id="neg-filter" onchange="loadNegotiations()" style="border:1px solid #ddd;border-radius:6px;padding:6px 10px;font-size:0.85rem;">
+          <option value="">All Statuses</option>
+          <option value="accepted">✅ Accepted</option>
+          <option value="countered">🔄 Countered</option>
+          <option value="rejected">❌ Rejected</option>
+        </select>
+        <button class="btn btn-success btn-sm" onclick="loadNegotiations()">↻ Refresh</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>Product</th><th>Buyer</th><th>Qty</th>
+            <th>List $</th><th>Offer $</th><th>Counter $</th>
+            <th>Discount %</th><th>Round</th><th>Status</th><th>AI Message</th><th>Order</th><th>Date</th>
+          </tr>
+        </thead>
+        <tbody id="neg-history-table"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <div id="tab-api" class="tab-content">
@@ -384,7 +412,31 @@
     <h3>Order #<span id="od-id"></span></h3>
     <div id="od-body"></div>
     <div class="modal-footer">
+      <button class="btn btn-danger" id="od-reject-btn" onclick="openRejectOrder()" style="display:none;">Reject Order</button>
       <button class="btn" onclick="closeModal('modal-order-detail')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reject Order Modal -->
+<div class="modal-overlay" id="modal-reject">
+  <div class="modal">
+    <h3>❌ Reject Order #<span id="reject-order-id"></span></h3>
+    <p style="color:#555;margin-bottom:16px;">This will cancel the order and restore inventory. Provide a reason:</p>
+    <div class="form-group" style="margin-bottom:16px;">
+      <label>Rejection Reason *</label>
+      <select id="reject-reason-preset" onchange="applyRejectPreset()" style="border:1px solid #ddd;border-radius:6px;padding:8px 10px;margin-bottom:8px;width:100%;font-size:0.9rem;">
+        <option value="">— Choose a reason or type below —</option>
+        <option value="Price offered is below our minimum acceptable price.">Price too low</option>
+        <option value="Negotiated price does not meet our margin requirements.">Below margin threshold</option>
+        <option value="Insufficient stock to fulfil this order at this time.">Stock issue</option>
+        <option value="Order quantity does not meet minimum order requirements.">Below minimum quantity</option>
+      </select>
+      <textarea id="reject-reason" rows="3" placeholder="Enter rejection reason..." style="width:100%;border:1px solid #ddd;border-radius:6px;padding:8px 10px;font-size:0.9rem;resize:vertical;"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-reject')">Cancel</button>
+      <button class="btn btn-danger" onclick="confirmRejectOrder()">Confirm Rejection</button>
     </div>
   </div>
 </div>
@@ -676,6 +728,9 @@ async function viewOrder(id) {
         <tr style="font-weight:700;"><td colspan="3" style="text-align:right;">Total</td><td>$${fmt(o.total_amount)}</td></tr>
       </tbody>
     </table>`;
+  // Show reject button only for active orders
+  const rejectBtn = document.getElementById('od-reject-btn');
+  rejectBtn.style.display = ['cancelled','rejected','delivered','failed'].includes(o.status) ? 'none' : 'inline-block';
   openModal('modal-order-detail');
 }
 
@@ -857,6 +912,75 @@ async function loadAnalytics() {
   });
   tableHtml += '</tbody></table>';
   document.getElementById('daily-trend').innerHTML = tableHtml;
+
+  // Load negotiation history too
+  loadNegotiations();
+}
+
+// ── NEGOTIATION HISTORY ───────────────────────────────────────
+async function loadNegotiations() {
+  const status = document.getElementById('neg-filter')?.value || '';
+  let url = `${API}/analytics/negotiations?limit=100`;
+  if (status) url += `&status=${status}`;
+  const rows = await fetch(url, {headers:H}).then(r => r.json());
+
+  const negStatusBadge = s => {
+    const map = { accepted:'#34a853', countered:'#ff6d00', rejected:'#ea4335', open:'#1a73e8' };
+    const icon = { accepted:'✅', countered:'🔄', rejected:'❌', open:'⏳' };
+    return `<span class="badge" style="background:${map[s]||'#eee'}22;color:${map[s]||'#555'}">${icon[s]||''} ${s}</span>`;
+  };
+
+  document.getElementById('neg-history-table').innerHTML = rows.map(n => `
+    <tr>
+      <td>#${n.id}</td>
+      <td style="font-size:0.85rem;"><b>${n.product_name}</b></td>
+      <td style="font-size:0.82rem;">${n.buyer_name||''}${n.buyer_email ? `<br><span style="color:#888">${n.buyer_email}</span>` : ''}</td>
+      <td>${n.quantity}</td>
+      <td>$${fmt(n.list_price)}</td>
+      <td><b>$${fmt(n.buyer_offer)}</b></td>
+      <td>${n.counter_offer ? `$${fmt(n.counter_offer)}` : '—'}</td>
+      <td style="color:${parseFloat(n.discount_requested_pct)>30?'#ea4335':'#34a853'}">${n.discount_requested_pct}%</td>
+      <td>${n.round}</td>
+      <td>${negStatusBadge(n.status)}</td>
+      <td style="font-size:0.78rem;color:#555;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${n.ai_message||''}">${n.ai_message||'—'}</td>
+      <td>${n.order_id ? `<a href="#" onclick="viewOrder(${n.order_id});return false;">#${n.order_id}</a>` : '—'}</td>
+      <td style="font-size:0.8rem;">${fmtDate(n.updated_at)}</td>
+    </tr>`).join('') || '<tr><td colspan="13" style="text-align:center;padding:20px;color:#888;">No negotiations found</td></tr>';
+}
+
+// ── REJECT ORDER ──────────────────────────────────────────────
+let rejectOrderId = null;
+
+function openRejectOrder() {
+  const id = document.getElementById('od-id').textContent;
+  rejectOrderId = id;
+  document.getElementById('reject-order-id').textContent = id;
+  document.getElementById('reject-reason').value = '';
+  document.getElementById('reject-reason-preset').value = '';
+  closeModal('modal-order-detail');
+  openModal('modal-reject');
+}
+
+function applyRejectPreset() {
+  const val = document.getElementById('reject-reason-preset').value;
+  if (val) document.getElementById('reject-reason').value = val;
+}
+
+async function confirmRejectOrder() {
+  const reason = document.getElementById('reject-reason').value.trim();
+  if (!reason) return toast('Please enter a rejection reason', 'error');
+
+  const res = await fetch(`${API}/analytics/orders/${rejectOrderId}/reject`, {
+    method: 'PATCH', headers: H,
+    body: JSON.stringify({ reason })
+  });
+  const data = await res.json();
+  if (!res.ok) return toast(data.error, 'error');
+
+  toast(`Order #${rejectOrderId} rejected — inventory restored`, 'success');
+  closeModal('modal-reject');
+  loadOrders();
+  if (document.getElementById('tab-analytics').classList.contains('active')) loadAnalytics();
 }
 
 // ── INIT ──────────────────────────────────────────────────────

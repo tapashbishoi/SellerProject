@@ -17,3 +17,5 @@ services:
         sync: false
       - key: PRICE_FLOOR_PCT
         value: "0.70"
+      - key: PRICE_HARD_REJECT_PCT
+        value: "0.60"
