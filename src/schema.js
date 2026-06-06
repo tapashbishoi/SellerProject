@@ -23,16 +23,22 @@ async function initSchema() {
       );
 
       CREATE TABLE IF NOT EXISTS orders (
-        id            SERIAL PRIMARY KEY,
-        buyer_name    VARCHAR(255) NOT NULL,
-        buyer_email   VARCHAR(255),
-        buyer_phone   VARCHAR(50),
-        status        VARCHAR(50) DEFAULT 'pending',
-        total_amount  NUMERIC(10,2) DEFAULT 0,
-        notes         TEXT,
-        created_at    TIMESTAMPTZ DEFAULT NOW(),
-        updated_at    TIMESTAMPTZ DEFAULT NOW()
+        id             SERIAL PRIMARY KEY,
+        buyer_name     VARCHAR(255) NOT NULL,
+        buyer_email    VARCHAR(255),
+        buyer_phone    VARCHAR(50),
+        status         VARCHAR(50) DEFAULT 'pending',
+        total_amount   NUMERIC(10,2) DEFAULT 0,
+        notes          TEXT,
+        failure_reason TEXT,
+        mq_message_id  VARCHAR(100),
+        created_at     TIMESTAMPTZ DEFAULT NOW(),
+        updated_at     TIMESTAMPTZ DEFAULT NOW()
       );
+
+      -- Add new columns if upgrading an existing DB
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS failure_reason TEXT;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS mq_message_id  VARCHAR(100);
 
       CREATE TABLE IF NOT EXISTS order_items (
         id          SERIAL PRIMARY KEY,

@@ -1,6 +1,46 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { publishOrder } = require('../mq/publisher');
+
+// POST /api/orders/stage — buyer submits order → goes to RabbitMQ for validation
+router.post('/stage', async (req, res) => {
+  const { buyer_name, buyer_email, buyer_phone, notes, items } = req.body;
+
+  if (!buyer_name || !items || !items.length)
+    return res.status(400).json({ error: 'buyer_name and items[] are required' });
+
+  for (const item of items) {
+    if (!item.product_id || !item.quantity || item.quantity < 1)
+      return res.status(400).json({ error: 'Each item needs product_id and quantity >= 1' });
+  }
+
+  // Pre-create a "queued" order row so the buyer gets an ID immediately
+  const { rows } = await pool.query(
+    `INSERT INTO orders (buyer_name, buyer_email, buyer_phone, notes, status)
+     VALUES ($1,$2,$3,$4,'queued') RETURNING id, created_at`,
+    [buyer_name, buyer_email, buyer_phone, notes]
+  );
+  const stagedOrder = rows[0];
+
+  // Publish to RabbitMQ
+  const messageId = await publishOrder({
+    staged_order_id: stagedOrder.id,
+    buyer_name, buyer_email, buyer_phone, notes, items,
+  });
+
+  // Store the messageId back on the order row
+  await pool.query(`UPDATE orders SET mq_message_id=$1 WHERE id=$2`, [messageId, stagedOrder.id]);
+
+  res.status(202).json({
+    message:    'Order received and queued for processing',
+    order_id:   stagedOrder.id,
+    status:     'queued',
+    message_id: messageId,
+    created_at: stagedOrder.created_at,
+    tip:        `Poll GET /api/orders/${stagedOrder.id} to check when status changes to confirmed or failed`,
+  });
+});
 
 // GET /api/orders — list all orders
 router.get('/', async (req, res) => {
