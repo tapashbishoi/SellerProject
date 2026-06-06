@@ -27,6 +27,31 @@ app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
 // MCP server for buyers — mounted BEFORE api key middleware (has its own auth)
 attachMcpToExpress(app, '/mcp');
 
+// ── MCP Discovery & Docs ──────────────────────────────────────
+
+// Layer 2: /.well-known/mcp.json — machine-readable discovery
+app.get('/.well-known/mcp.json', (req, res) => {
+  const base = `${req.protocol}://${req.get('host')}`;
+  res.json({
+    schema_version: '1.0',
+    name:           'Seller Agent MCP Server',
+    description:    'Stationery seller — browse catalogue, check inventory, place orders, negotiate prices',
+    mcp_endpoint:   `${base}/mcp`,
+    docs_url:       `${base}/mcp-docs`,
+    tools_count:    9,
+    categories:     ['catalogue', 'inventory', 'orders', 'negotiation'],
+    auth: {
+      type:        'header',
+      header_name: 'X-API-Key',
+      note:        'Contact seller for a buyer API key',
+    },
+    contact: process.env.SELLER_EMAIL || '',
+  });
+});
+
+// Layer 3: /mcp-docs — human-readable tool docs page (served from public/)
+
+
 // Protect all /api/* routes
 app.use('/api', requireApiKey);
 
