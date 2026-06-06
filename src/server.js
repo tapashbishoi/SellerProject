@@ -5,6 +5,8 @@ const path = require('path');
 const initSchema = require('./schema');
 
 const requireApiKey = require('./middleware/apiKey');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./swagger');
 
 const app = express();
 app.use(cors());
@@ -12,6 +14,12 @@ app.use(express.json());
 
 // Serve UI (no key needed for dashboard)
 app.use(express.static(path.join(__dirname, '../public')));
+
+// Swagger docs — no API key needed to read the docs
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customSiteTitle: 'Seller API Docs',
+  swaggerOptions: { persistAuthorization: true },
+}));
 
 // Protect all /api/* routes
 app.use('/api', requireApiKey);
