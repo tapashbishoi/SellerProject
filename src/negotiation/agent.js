@@ -28,7 +28,7 @@ async function getBuyerHistory(buyer_email) {
 
 // ── Gemini negotiation evaluator ─────────────────────────────
 async function evaluateOffer({ product, quantity, buyer_offer, floor_price, buyer_history, round, previous_counter }) {
-  const model = getGemini().getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const model = getGemini().getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-flash-latest' });
 
   const prompt = `You are a professional sales negotiation agent for a stationery business.
 
