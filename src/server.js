@@ -4,12 +4,17 @@ const cors = require('cors');
 const path = require('path');
 const initSchema = require('./schema');
 
+const requireApiKey = require('./middleware/apiKey');
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Serve UI
+// Serve UI (no key needed for dashboard)
 app.use(express.static(path.join(__dirname, '../public')));
+
+// Protect all /api/* routes
+app.use('/api', requireApiKey);
 
 // API routes
 app.use('/api/products',  require('./routes/products'));

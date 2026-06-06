@@ -343,6 +343,8 @@
 
 <script>
 const API = window.location.origin + '/api';
+const API_KEY = 'seller-admin-key-2025';
+const H = { 'Content-Type': 'application/json', 'X-API-Key': API_KEY };
 document.getElementById('api-base').textContent = API;
 document.getElementById('header-date').textContent = new Date().toLocaleDateString('en-IN', { dateStyle: 'long' });
 
@@ -383,9 +385,9 @@ function fmtDate(d) { return new Date(d).toLocaleDateString('en-IN', { day:'2-di
 // ── DASHBOARD ─────────────────────────────────────────────────
 async function loadDashboard() {
   const [prods, orders, inv] = await Promise.all([
-    fetch(`${API}/products`).then(r => r.json()),
-    fetch(`${API}/orders`).then(r => r.json()),
-    fetch(`${API}/inventory`).then(r => r.json()),
+    fetch(`${API}/products`, {headers:H}).then(r => r.json()),
+    fetch(`${API}/orders`, {headers:H}).then(r => r.json()),
+    fetch(`${API}/inventory`, {headers:H}).then(r => r.json()),
   ]);
 
   document.getElementById('stat-products').textContent = prods.length;
@@ -426,7 +428,7 @@ async function loadCatalogue() {
   let url = `${API}/products?`;
   if (search) url += `search=${encodeURIComponent(search)}&`;
   if (cat)    url += `category=${encodeURIComponent(cat)}`;
-  const prods = await fetch(url).then(r => r.json());
+  const prods = await fetch(url, {headers:H}).then(r => r.json());
   productCache = prods;
   const tbody = document.getElementById('catalogue-body');
   tbody.innerHTML = prods.map(p => `
@@ -458,7 +460,7 @@ function openAddProduct() {
 }
 
 async function openEditProduct(id) {
-  const p = await fetch(`${API}/products/${id}`).then(r => r.json());
+  const p = await fetch(`${API}/products/${id}`, {headers:H}).then(r => r.json());
   editingProductId = id;
   document.getElementById('p-name').value = p.name;
   document.getElementById('p-desc').value = p.description || '';
@@ -485,7 +487,7 @@ async function saveProduct() {
 
   const url    = editingProductId ? `${API}/products/${editingProductId}` : `${API}/products`;
   const method = editingProductId ? 'PUT' : 'POST';
-  const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const res = await fetch(url, { method, headers: H, body: JSON.stringify(body) });
   if (!res.ok) { const e = await res.json(); return toast(e.error, 'error'); }
   toast(editingProductId ? 'Product updated' : 'Product added');
   closeModal('modal-product');
@@ -494,14 +496,14 @@ async function saveProduct() {
 
 async function deleteProduct(id, name) {
   if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
-  await fetch(`${API}/products/${id}`, { method: 'DELETE' });
+  await fetch(`${API}/products/${id}`, { method: 'DELETE', headers: H });
   toast('Product deleted');
   loadCatalogue();
 }
 
 // ── INVENTORY ─────────────────────────────────────────────────
 async function loadInventory() {
-  const inv = await fetch(`${API}/inventory`).then(r => r.json());
+  const inv = await fetch(`${API}/inventory`, {headers:H}).then(r => r.json());
   productCache = inv;
   const tbody = document.getElementById('inventory-body');
   tbody.innerHTML = inv.map(i => `
@@ -534,7 +536,7 @@ async function saveStock() {
 
   if (add && parseInt(add) > 0) {
     const res = await fetch(`${API}/inventory/${productId}/restock`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: H,
       body: JSON.stringify({ add_quantity: parseInt(add) })
     });
     if (!res.ok) { const e = await res.json(); return toast(e.error, 'error'); }
@@ -544,7 +546,7 @@ async function saveStock() {
     if (threshold !== '') body.low_stock_threshold = parseInt(threshold);
     if (!Object.keys(body).length) return toast('Enter a quantity or amount to add', 'error');
     const res = await fetch(`${API}/inventory/${productId}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      method: 'PATCH', headers: H,
       body: JSON.stringify(body)
     });
     if (!res.ok) { const e = await res.json(); return toast(e.error, 'error'); }
@@ -554,7 +556,7 @@ async function saveStock() {
   closeModal('modal-stock');
   loadInventory();
   // Refresh dashboard alert count silently
-  fetch(`${API}/inventory`);
+  fetch(`${API}/inventory`, {headers:H});
 }
 
 // ── ORDERS ────────────────────────────────────────────────────
@@ -562,7 +564,7 @@ async function loadOrders() {
   const status = document.getElementById('order-filter').value;
   let url = `${API}/orders`;
   if (status) url += `?status=${status}`;
-  const orders = await fetch(url).then(r => r.json());
+  const orders = await fetch(url, {headers:H}).then(r => r.json());
   const tbody = document.getElementById('orders-body');
   tbody.innerHTML = orders.map(o => {
     const items = (o.items || []).filter(Boolean);
@@ -591,7 +593,7 @@ async function changeStatus(id, status, el) {
   if (!status) return;
   if (!confirm(`Mark order #${id} as "${status}"?`)) { el.value = ''; return; }
   const res = await fetch(`${API}/orders/${id}/status`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    method: 'PATCH', headers: H,
     body: JSON.stringify({ status })
   });
   if (!res.ok) { const e = await res.json(); return toast(e.error, 'error'); }
@@ -600,7 +602,7 @@ async function changeStatus(id, status, el) {
 }
 
 async function viewOrder(id) {
-  const o = await fetch(`${API}/orders/${id}`).then(r => r.json());
+  const o = await fetch(`${API}/orders/${id}`, {headers:H}).then(r => r.json());
   document.getElementById('od-id').textContent = o.id;
   const items = (o.items || []).filter(Boolean);
   document.getElementById('od-body').innerHTML = `
@@ -622,7 +624,7 @@ async function viewOrder(id) {
 async function openPlaceOrder() {
   ['o-name','o-email','o-phone','o-notes'].forEach(id => document.getElementById(id).value = '');
   // Refresh product cache
-  productCache = await fetch(`${API}/products`).then(r => r.json());
+  productCache = await fetch(`${API}/products`, {headers:H}).then(r => r.json());
   document.getElementById('order-items-container').innerHTML = '';
   addItemRow();
   openModal('modal-order');
@@ -667,7 +669,7 @@ async function submitOrder() {
   if (!items.length) return toast('Add at least one item', 'error');
 
   const res = await fetch(`${API}/orders`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: H,
     body: JSON.stringify({ buyer_name, buyer_email, buyer_phone, notes, items })
   });
   const data = await res.json();
@@ -682,3 +684,4 @@ loadDashboard();
 </script>
 </body>
 </html>
+
