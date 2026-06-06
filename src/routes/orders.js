@@ -87,68 +87,43 @@ router.get('/:id', async (req, res) => {
   res.json(rows[0]);
 });
 
-// POST /api/orders — place a new order (auto-deducts inventory)
+// POST /api/orders — now routes through MQ (same as /stage)
 router.post('/', async (req, res) => {
   const { buyer_name, buyer_email, buyer_phone, notes, items } = req.body;
+
   if (!buyer_name || !items || !items.length)
     return res.status(400).json({ error: 'buyer_name and items[] are required' });
 
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    // Validate stock for each item
-    for (const item of items) {
-      const { rows } = await client.query(
-        `SELECT p.name, i.quantity FROM products p JOIN inventory i ON i.product_id = p.id WHERE p.id = $1 FOR UPDATE`,
-        [item.product_id]
-      );
-      if (!rows.length) throw { status: 404, message: `Product ${item.product_id} not found` };
-      if (rows[0].quantity < item.quantity)
-        throw { status: 409, message: `Insufficient stock for "${rows[0].name}". Available: ${rows[0].quantity}` };
-    }
-
-    // Create order
-    const orderRes = await client.query(
-      `INSERT INTO orders (buyer_name, buyer_email, buyer_phone, notes) VALUES ($1,$2,$3,$4) RETURNING *`,
-      [buyer_name, buyer_email, buyer_phone, notes]
-    );
-    const order = orderRes.rows[0];
-
-    let totalAmount = 0;
-    const insertedItems = [];
-
-    for (const item of items) {
-      const { rows: prodRows } = await client.query(`SELECT price FROM products WHERE id=$1`, [item.product_id]);
-      const unitPrice = prodRows[0].price;
-      totalAmount += unitPrice * item.quantity;
-
-      await client.query(
-        `INSERT INTO order_items (order_id, product_id, quantity, unit_price) VALUES ($1,$2,$3,$4)`,
-        [order.id, item.product_id, item.quantity, unitPrice]
-      );
-
-      // Deduct inventory
-      await client.query(
-        `UPDATE inventory SET quantity = quantity - $1, updated_at = NOW() WHERE product_id = $2`,
-        [item.quantity, item.product_id]
-      );
-
-      insertedItems.push({ product_id: item.product_id, quantity: item.quantity, unit_price: unitPrice });
-    }
-
-    // Update total
-    await client.query(`UPDATE orders SET total_amount=$1 WHERE id=$2`, [totalAmount, order.id]);
-
-    await client.query('COMMIT');
-    res.status(201).json({ ...order, total_amount: totalAmount, items: insertedItems });
-  } catch (e) {
-    await client.query('ROLLBACK');
-    if (e.status) return res.status(e.status).json({ error: e.message });
-    throw e;
-  } finally {
-    client.release();
+  for (const item of items) {
+    if (!item.product_id || !item.quantity || item.quantity < 1)
+      return res.status(400).json({ error: 'Each item needs product_id and quantity >= 1' });
   }
+
+  // Create order row as queued
+  const { rows } = await pool.query(
+    `INSERT INTO orders (buyer_name, buyer_email, buyer_phone, notes, status)
+     VALUES ($1,$2,$3,$4,'queued') RETURNING id, created_at`,
+    [buyer_name, buyer_email, buyer_phone, notes]
+  );
+  const staged = rows[0];
+
+  // Publish to RabbitMQ
+  const messageId = await publishOrder({
+    staged_order_id: staged.id,
+    buyer_name, buyer_email, buyer_phone, notes, items,
+  });
+
+  await pool.query(`UPDATE orders SET mq_message_id=$1 WHERE id=$2`, [messageId, staged.id]);
+
+  console.log(`[Orders] Order #${staged.id} queued — messageId: ${messageId}`);
+
+  res.status(202).json({
+    message:    'Order queued for processing',
+    order_id:   staged.id,
+    status:     'queued',
+    message_id: messageId,
+    created_at: staged.created_at,
+  });
 });
 
 // PATCH /api/orders/:id/status — update order status

@@ -674,9 +674,29 @@ async function submitOrder() {
   });
   const data = await res.json();
   if (!res.ok) return toast(data.error, 'error');
-  toast(`Order #${data.id} placed successfully!`);
+
+  toast(`Order #${data.order_id} queued — confirming via RabbitMQ...`);
   closeModal('modal-order');
   loadOrders();
+
+  // Poll every 2s up to 20s until confirmed/failed
+  let attempts = 0;
+  const poll = setInterval(async () => {
+    attempts++;
+    const o = await fetch(`${API}/orders/${data.order_id}`, {headers:H}).then(r => r.json());
+    if (o.status === 'confirmed') {
+      clearInterval(poll);
+      toast(`Order #${data.order_id} confirmed! Total: $${parseFloat(o.total_amount).toLocaleString('en-US')}`, 'success');
+      loadOrders();
+    } else if (o.status === 'failed') {
+      clearInterval(poll);
+      toast(`Order #${data.order_id} failed: ${o.failure_reason}`, 'error');
+      loadOrders();
+    } else if (attempts >= 10) {
+      clearInterval(poll);
+      toast(`Order #${data.order_id} is still processing — refresh to check status`);
+    }
+  }, 2000);
 }
 
 // ── INIT ──────────────────────────────────────────────────────
