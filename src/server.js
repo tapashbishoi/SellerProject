@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const initSchema = require('./schema');
 const { startConsumer } = require('./mq/consumer');
+const { getMQStatus }   = require('./mq/connection');
 
 const requireApiKey = require('./middleware/apiKey');
 const swaggerUi = require('swagger-ui-express');
@@ -30,8 +31,17 @@ app.use('/api/products',  require('./routes/products'));
 app.use('/api/inventory', require('./routes/inventory'));
 app.use('/api/orders',    require('./routes/orders'));
 
-// Health check
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+// Health check — shows DB + MQ status
+app.get('/api/health', async (req, res) => {
+  let dbOk = false;
+  try { await require('./db').query('SELECT 1'); dbOk = true; } catch (_) {}
+  const mq = getMQStatus();
+  res.json({
+    status: dbOk && mq.connected ? 'ok' : 'degraded',
+    db: dbOk ? 'connected' : 'error',
+    mq,
+  });
+});
 
 // Error handler
 app.use((err, req, res, next) => {

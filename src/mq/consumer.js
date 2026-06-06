@@ -86,12 +86,65 @@ async function processOrder(orderData) {
 }
 
 /**
+ * Orders left as "pending" after a crash never get re-queued automatically.
+ * On every startup, reset them back to "queued" and re-publish to MQ.
+ */
+async function requeueStuckOrders() {
+  const { publishOrder } = require('./publisher');
+  const { rows } = await pool.query(
+    `SELECT o.id, o.buyer_name, o.buyer_email, o.buyer_phone, o.notes,
+            json_agg(json_build_object('product_id', oi.product_id, 'quantity', oi.quantity)) AS items
+     FROM orders o
+     JOIN order_items oi ON oi.order_id = o.id
+     WHERE o.status = 'pending'
+     GROUP BY o.id`
+  );
+
+  // Also handle queued orders that have no items yet (staged but never consumed)
+  const { rows: queuedRows } = await pool.query(
+    `SELECT o.id, o.buyer_name, o.buyer_email, o.buyer_phone, o.notes, o.mq_message_id
+     FROM orders o
+     LEFT JOIN order_items oi ON oi.order_id = o.id
+     WHERE o.status IN ('queued','pending')
+     GROUP BY o.id
+     HAVING COUNT(oi.id) = 0`
+  );
+
+  if (rows.length > 0) {
+    console.log(`[Consumer] Found ${rows.length} stuck "pending" order(s) — re-queuing...`);
+    for (const order of rows) {
+      // Roll back any partial item inserts and deductions for stuck pending orders
+      await pool.query(`DELETE FROM order_items WHERE order_id = $1`, [order.id]);
+      await pool.query(`UPDATE orders SET status='queued', updated_at=NOW() WHERE id=$1`, [order.id]);
+      await publishOrder({ staged_order_id: order.id, ...order });
+      console.log(`[Consumer] Re-queued stuck order #${order.id}`);
+    }
+  }
+
+  if (queuedRows.length > 0) {
+    console.log(`[Consumer] Found ${queuedRows.length} un-processed "queued" order(s) — re-publishing...`);
+    for (const order of queuedRows) {
+      // These have no items — we can't re-process without items; mark failed
+      await pool.query(
+        `UPDATE orders SET status='failed', failure_reason='Order items missing — please re-submit', updated_at=NOW() WHERE id=$1`,
+        [order.id]
+      );
+      console.log(`[Consumer] Marked order #${order.id} as failed (no items found)`);
+    }
+  }
+}
+
+/**
  * Start the consumer loop — runs inside the same process as the API server.
  * Non-fatal: if MQ is unavailable the API still works; retries after 10s.
  */
 async function startConsumer() {
   try {
     const channel = await getChannel();
+
+    // Fix any orders stuck in 'pending' from a previous crashed run
+    await requeueStuckOrders();
+
     channel.prefetch(1);
     console.log('[Consumer] Waiting for orders in the background...');
 
