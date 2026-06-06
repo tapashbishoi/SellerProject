@@ -3,8 +3,9 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const initSchema = require('./schema');
-const { startConsumer } = require('./mq/consumer');
-const { getMQStatus }   = require('./mq/connection');
+const { startConsumer }    = require('./mq/consumer');
+const { getMQStatus }      = require('./mq/connection');
+const { attachMcpToExpress } = require('./mcp/buyer-server');
 
 const requireApiKey = require('./middleware/apiKey');
 const swaggerUi = require('swagger-ui-express');
@@ -22,6 +23,9 @@ app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customSiteTitle: 'Seller API Docs',
   swaggerOptions: { persistAuthorization: true },
 }));
+
+// MCP server for buyers — mounted BEFORE api key middleware (has its own auth)
+attachMcpToExpress(app, '/mcp');
 
 // Protect all /api/* routes
 app.use('/api', requireApiKey);
