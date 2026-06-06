@@ -1,10 +1,7 @@
 require('dotenv').config();
-const { getChannel, QUEUE } = require('./connection');
+const { connect, onReady, getMQStatus } = require('./connection');
 const pool = require('../db');
 
-/**
- * Validate and place an order from a queued message.
- */
 async function processOrder(orderData) {
   const { messageId, payload } = orderData;
   const { buyer_name, buyer_email, buyer_phone, notes, items, staged_order_id } = payload;
@@ -13,12 +10,11 @@ async function processOrder(orderData) {
   try {
     await client.query('BEGIN');
 
-    // 1. Validate every item has enough stock (lock rows)
+    // 1. Validate stock (lock rows)
     for (const item of items) {
       const { rows } = await client.query(
         `SELECT p.name, i.quantity
-         FROM products p
-         JOIN inventory i ON i.product_id = p.id
+         FROM products p JOIN inventory i ON i.product_id = p.id
          WHERE p.id = $1 FOR UPDATE`,
         [item.product_id]
       );
@@ -27,11 +23,13 @@ async function processOrder(orderData) {
         throw new Error(`Insufficient stock for "${rows[0].name}". Requested: ${item.quantity}, Available: ${rows[0].quantity}`);
     }
 
-    // 2. Update or create the order row
+    // 2. Upsert order row
     let orderId;
     if (staged_order_id) {
+      // Clear any leftover items from a previous failed attempt
+      await client.query(`DELETE FROM order_items WHERE order_id = $1`, [staged_order_id]);
       await client.query(
-        `UPDATE orders SET status='pending', updated_at=NOW(), failure_reason=NULL WHERE id=$1`,
+        `UPDATE orders SET status='pending', failure_reason=NULL, updated_at=NOW() WHERE id=$1`,
         [staged_order_id]
       );
       orderId = staged_order_id;
@@ -44,11 +42,11 @@ async function processOrder(orderData) {
       orderId = rows[0].id;
     }
 
-    // 3. Insert order items + deduct inventory
+    // 3. Insert items + deduct inventory
     let totalAmount = 0;
     for (const item of items) {
-      const { rows: prodRows } = await client.query(`SELECT price FROM products WHERE id=$1`, [item.product_id]);
-      const unitPrice = parseFloat(prodRows[0].price);
+      const { rows: p } = await client.query(`SELECT price FROM products WHERE id=$1`, [item.product_id]);
+      const unitPrice = parseFloat(p[0].price);
       totalAmount += unitPrice * item.quantity;
 
       await client.query(
@@ -61,7 +59,7 @@ async function processOrder(orderData) {
       );
     }
 
-    // 4. Finalise
+    // 4. Confirm
     await client.query(
       `UPDATE orders SET total_amount=$1, status='confirmed', updated_at=NOW() WHERE id=$2`,
       [totalAmount, orderId]
@@ -71,12 +69,12 @@ async function processOrder(orderData) {
     return { success: true, orderId };
 
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     if (payload.staged_order_id) {
       await pool.query(
         `UPDATE orders SET status='failed', failure_reason=$1, updated_at=NOW() WHERE id=$2`,
         [err.message, payload.staged_order_id]
-      );
+      ).catch(() => {});
     }
     console.error(`[Consumer] ❌ Order failed — ${err.message}`);
     return { success: false, error: err.message };
@@ -85,87 +83,61 @@ async function processOrder(orderData) {
   }
 }
 
-/**
- * Orders left as "pending" after a crash never get re-queued automatically.
- * On every startup, reset them back to "queued" and re-publish to MQ.
- */
+// Reset stuck pending/queued orders on startup and re-publish them
 async function requeueStuckOrders() {
-  const { publishOrder } = require('./publisher');
-  const { rows } = await pool.query(
-    `SELECT o.id, o.buyer_name, o.buyer_email, o.buyer_phone, o.notes,
-            json_agg(json_build_object('product_id', oi.product_id, 'quantity', oi.quantity)) AS items
-     FROM orders o
-     JOIN order_items oi ON oi.order_id = o.id
-     WHERE o.status = 'pending'
-     GROUP BY o.id`
-  );
+  try {
+    const { rows } = await pool.query(`
+      SELECT o.id, o.buyer_name, o.buyer_email, o.buyer_phone, o.notes,
+             json_agg(json_build_object('product_id', oi.product_id, 'quantity', oi.quantity)) AS items
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.id
+      WHERE o.status IN ('pending', 'queued')
+      GROUP BY o.id`
+    );
 
-  // Also handle queued orders that have no items yet (staged but never consumed)
-  const { rows: queuedRows } = await pool.query(
-    `SELECT o.id, o.buyer_name, o.buyer_email, o.buyer_phone, o.notes, o.mq_message_id
-     FROM orders o
-     LEFT JOIN order_items oi ON oi.order_id = o.id
-     WHERE o.status IN ('queued','pending')
-     GROUP BY o.id
-     HAVING COUNT(oi.id) = 0`
-  );
+    if (!rows.length) return;
 
-  if (rows.length > 0) {
-    console.log(`[Consumer] Found ${rows.length} stuck "pending" order(s) — re-queuing...`);
+    const { publishOrder } = require('./publisher');
+    console.log(`[Consumer] Found ${rows.length} stuck order(s) — re-queuing...`);
+
     for (const order of rows) {
-      // Roll back any partial item inserts and deductions for stuck pending orders
       await pool.query(`DELETE FROM order_items WHERE order_id = $1`, [order.id]);
-      await pool.query(`UPDATE orders SET status='queued', updated_at=NOW() WHERE id=$1`, [order.id]);
-      await publishOrder({ staged_order_id: order.id, ...order });
-      console.log(`[Consumer] Re-queued stuck order #${order.id}`);
+      await pool.query(`UPDATE orders SET status='queued', failure_reason=NULL, updated_at=NOW() WHERE id=$1`, [order.id]);
+      await publishOrder({ staged_order_id: order.id, buyer_name: order.buyer_name, buyer_email: order.buyer_email, buyer_phone: order.buyer_phone, notes: order.notes, items: order.items });
+      console.log(`[Consumer] Re-queued order #${order.id}`);
     }
-  }
-
-  if (queuedRows.length > 0) {
-    console.log(`[Consumer] Found ${queuedRows.length} un-processed "queued" order(s) — re-publishing...`);
-    for (const order of queuedRows) {
-      // These have no items — we can't re-process without items; mark failed
-      await pool.query(
-        `UPDATE orders SET status='failed', failure_reason='Order items missing — please re-submit', updated_at=NOW() WHERE id=$1`,
-        [order.id]
-      );
-      console.log(`[Consumer] Marked order #${order.id} as failed (no items found)`);
-    }
+  } catch (err) {
+    console.error('[Consumer] requeueStuckOrders error:', err.message);
   }
 }
 
-/**
- * Start the consumer loop — runs inside the same process as the API server.
- * Non-fatal: if MQ is unavailable the API still works; retries after 10s.
- */
-async function startConsumer() {
-  try {
-    const channel = await getChannel();
+// Called every time MQ connects (initial + after reconnect)
+async function registerConsumer(channel) {
+  await requeueStuckOrders();
 
-    // Fix any orders stuck in 'pending' from a previous crashed run
-    await requeueStuckOrders();
+  channel.consume(process.env.RABBITMQ_QUEUE || 'order_staging', async (msg) => {
+    if (!msg) return;
+    let orderData;
+    try {
+      orderData = JSON.parse(msg.content.toString());
+      console.log(`[Consumer] Received messageId: ${orderData.messageId}`);
+    } catch {
+      console.error('[Consumer] Invalid JSON — discarding');
+      channel.nack(msg, false, false);
+      return;
+    }
+    const result = await processOrder(orderData);
+    result.success ? channel.ack(msg) : channel.nack(msg, false, false);
+  });
 
-    channel.prefetch(1);
-    console.log('[Consumer] Waiting for orders in the background...');
+  console.log('[Consumer] Listening for orders...');
+}
 
-    channel.consume(QUEUE, async (msg) => {
-      if (!msg) return;
-      let orderData;
-      try {
-        orderData = JSON.parse(msg.content.toString());
-        console.log(`[Consumer] Received messageId: ${orderData.messageId}`);
-      } catch {
-        console.error('[Consumer] Invalid JSON — discarding message');
-        channel.nack(msg, false, false);
-        return;
-      }
-      const result = await processOrder(orderData);
-      result.success ? channel.ack(msg) : channel.nack(msg, false, false);
-    });
-  } catch (err) {
-    console.error(`[Consumer] Could not connect to RabbitMQ: ${err.message} — retrying in 10s`);
-    setTimeout(startConsumer, 10_000);
-  }
+function startConsumer() {
+  // Register handler — runs on initial connect AND every reconnect
+  onReady(registerConsumer);
+  // Kick off the connection (with auto-retry built in)
+  connect();
 }
 
 module.exports = { startConsumer };

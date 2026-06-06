@@ -1,63 +1,79 @@
 require('dotenv').config();
 const amqp = require('amqplib');
 
-let connection = null;
-let channel    = null;
-let connected  = false;
-let lastError  = null;
-
 const QUEUE = process.env.RABBITMQ_QUEUE || 'order_staging';
 
-async function getChannel() {
-  if (channel && connected) return channel;
+let state = {
+  connection: null,
+  channel:    null,
+  connected:  false,
+  lastError:  null,
+};
 
-  if (!process.env.RABBITMQ_URL) {
-    throw new Error('RABBITMQ_URL environment variable is not set');
-  }
+// Callbacks registered by the consumer — re-invoked after reconnect
+let onReadyCallbacks = [];
 
-  connection = await amqp.connect(process.env.RABBITMQ_URL);
-  channel    = await connection.createChannel();
-
-  await channel.assertQueue(QUEUE, { durable: true });
-
-  connected = true;
-  lastError = null;
-
-  // Reset state on unexpected close
-  connection.on('close', () => {
-    console.warn('[MQ] Connection closed unexpectedly');
-    connected = false;
-    channel   = null;
-    connection = null;
-  });
-  connection.on('error', (err) => {
-    console.error('[MQ] Connection error:', err.message);
-    connected = false;
-    lastError = err.message;
-  });
-
-  process.on('SIGINT',  closeConnection);
-  process.on('SIGTERM', closeConnection);
-
-  console.log(`[MQ] Connected — queue: "${QUEUE}"`);
-  return channel;
+function onReady(fn) {
+  onReadyCallbacks.push(fn);
 }
 
-async function closeConnection() {
+async function connect(retryDelay = 5000) {
+  if (!process.env.RABBITMQ_URL) {
+    console.error('[MQ] RABBITMQ_URL is not set — consumer disabled');
+    state.lastError = 'RABBITMQ_URL not set';
+    return;
+  }
+
   try {
-    if (channel)    await channel.close();
-    if (connection) await connection.close();
-  } catch (_) {}
-  connected = false;
+    console.log('[MQ] Connecting...');
+    state.connection = await amqp.connect(process.env.RABBITMQ_URL);
+    state.channel    = await state.connection.createChannel();
+
+    await state.channel.assertQueue(QUEUE, { durable: true });
+    state.channel.prefetch(1);
+
+    state.connected = true;
+    state.lastError = null;
+    console.log(`[MQ] Connected — queue: "${QUEUE}"`);
+
+    // Re-register all consumers after reconnect
+    for (const fn of onReadyCallbacks) {
+      try { await fn(state.channel); } catch (e) { console.error('[MQ] onReady callback error:', e.message); }
+    }
+
+    // Reconnect on unexpected close
+    state.connection.on('close', () => {
+      state.connected = false;
+      state.channel   = null;
+      state.connection = null;
+      console.warn(`[MQ] Connection closed — reconnecting in ${retryDelay / 1000}s...`);
+      setTimeout(() => connect(retryDelay), retryDelay);
+    });
+
+    state.connection.on('error', (err) => {
+      state.lastError = err.message;
+      console.error('[MQ] Connection error:', err.message);
+    });
+
+  } catch (err) {
+    state.connected = false;
+    state.lastError = err.message;
+    console.error(`[MQ] Failed to connect: ${err.message} — retrying in ${retryDelay / 1000}s`);
+    setTimeout(() => connect(retryDelay), retryDelay);
+  }
+}
+
+function getChannel() {
+  return state.channel;
 }
 
 function getMQStatus() {
   return {
-    connected,
-    queue: QUEUE,
+    connected:        state.connected,
+    queue:            QUEUE,
     rabbitmq_url_set: !!process.env.RABBITMQ_URL,
-    last_error: lastError,
+    last_error:       state.lastError,
   };
 }
 
-module.exports = { getChannel, QUEUE, getMQStatus };
+module.exports = { connect, getChannel, onReady, QUEUE, getMQStatus };
