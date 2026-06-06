@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const initSchema = require('./schema');
+const { startConsumer } = require('./mq/consumer');
 
 const requireApiKey = require('./middleware/apiKey');
 const swaggerUi = require('swagger-ui-express');
@@ -41,5 +42,9 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 
 initSchema()
-  .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
+  .then(() => {
+    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    // Start MQ consumer in the same process (works on Render free tier)
+    startConsumer();
+  })
   .catch(err => { console.error('Failed to init DB:', err); process.exit(1); });

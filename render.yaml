@@ -1,5 +1,4 @@
 services:
-  # API + UI web service
   - type: web
     name: seller-agent
     env: node
@@ -9,20 +8,6 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: API_KEYS
-        sync: false
-      - key: RABBITMQ_URL
-        sync: false
-      - key: RABBITMQ_QUEUE
-        value: order_staging
-
-  # RabbitMQ order consumer (background worker)
-  - type: worker
-    name: seller-agent-consumer
-    env: node
-    buildCommand: npm install
-    startCommand: npm run consumer
-    envVars:
-      - key: DATABASE_URL
         sync: false
       - key: RABBITMQ_URL
         sync: false
