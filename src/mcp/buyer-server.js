@@ -17,6 +17,7 @@ const { StreamableHTTPServerTransport } = require(path.join(mcpServerDir, 'strea
 const z = require('zod');
 const pool                             = require('../db');
 const { publishOrder }                 = require('../mq/publisher');
+const { handleNegotiation }            = require('../negotiation/agent');
 
 // ── Tool helpers ──────────────────────────────────────────────
 
@@ -278,6 +279,97 @@ Total:   $${parseFloat(o.total_amount || 0).toFixed(2)}
         `• Order #${o.id} — ${statusEmoji[o.status] || ''} ${o.status} | $${parseFloat(o.total_amount || 0).toFixed(2)} | ${o.item_count} item(s) | ${new Date(o.created_at).toLocaleDateString()}`
       );
       return { content: [{ type: 'text', text: `Orders for ${buyer_email} (${orders.length} total):\n\n${lines.join('\n')}` }] };
+    }
+  );
+
+  // ── Tool 7: negotiate_price ──────────────────────────────────
+  server.tool(
+    'negotiate_price',
+    'Propose a price for a product. The AI seller agent will evaluate your offer and respond with accept, counter-offer, or rejection in real-time. Use negotiation_id to continue a previous round.',
+    {
+      product_id:     z.number().int().positive().describe('Product ID to negotiate for'),
+      proposed_price: z.number().positive().describe('Your proposed price per unit in USD'),
+      quantity:       z.number().int().positive().describe('Number of units you want to buy'),
+      buyer_email:    z.string().email().describe('Your email address'),
+      buyer_name:     z.string().optional().describe('Your name (optional)'),
+      negotiation_id: z.number().int().positive().optional().describe('Provide this to continue a previous negotiation round'),
+    },
+    async ({ product_id, proposed_price, quantity, buyer_email, buyer_name, negotiation_id }) => {
+      try {
+        const result = await handleNegotiation({
+          product_id, buyer_offer: proposed_price, buyer_email, buyer_name, quantity, negotiation_id,
+        });
+        const icon = { accepted: '✅', countered: '🔄', rejected: '❌' }[result.status] || '';
+        let text = `${icon} Negotiation ${result.status.toUpperCase()} — Round ${result.round}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Product:      ${result.product}
+List Price:   $${result.list_price.toFixed(2)}/unit
+Your Offer:   $${result.your_offer.toFixed(2)}/unit × ${quantity} = $${(result.your_offer * quantity).toFixed(2)}
+`;
+        if (result.counter_offer) text += `Counter Offer: $${result.counter_offer.toFixed(2)}/unit × ${quantity} = $${(result.counter_offer * quantity).toFixed(2)}\n`;
+        if (result.agreed_price)  text += `Agreed Price:  $${result.agreed_price.toFixed(2)}/unit\n`;
+        text += `\n💬 ${result.message}\n\n📋 ${result.next_steps}`;
+        if (result.negotiation_id) text += `\n\nNegotiation ID: ${result.negotiation_id}`;
+        return { content: [{ type: 'text', text }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: `❌ Error: ${err.message}` }] };
+      }
+    }
+  );
+
+  // ── Tool 8: get_negotiation ───────────────────────────────────
+  server.tool(
+    'get_negotiation',
+    'Check the current status of a price negotiation by its ID.',
+    {
+      negotiation_id: z.number().int().positive().describe('The negotiation ID'),
+      buyer_email:    z.string().email().describe('Your email (must match the negotiation)'),
+    },
+    async ({ negotiation_id, buyer_email }) => {
+      const { rows } = await pool.query(
+        `SELECT n.*, p.name AS product_name FROM negotiations n
+         JOIN products p ON p.id = n.product_id
+         WHERE n.id = $1 AND LOWER(n.buyer_email) = LOWER($2)`,
+        [negotiation_id, buyer_email]
+      );
+      if (!rows.length) return { content: [{ type: 'text', text: 'Negotiation not found or email does not match.' }] };
+      const n = rows[0];
+      const icon = { accepted: '✅', countered: '🔄', rejected: '❌', open: '⏳' }[n.status] || '';
+      return { content: [{ type: 'text', text: `${icon} Negotiation #${n.id} — ${n.status.toUpperCase()}
+Product:       ${n.product_name}
+Your offer:    $${n.buyer_offer}/unit × ${n.quantity} units
+Counter offer: ${n.counter_offer ? `$${n.counter_offer}/unit` : 'N/A'}
+Round:         ${n.round}
+Message:       ${n.ai_message || 'N/A'}
+${n.order_id ? `Order placed:  #${n.order_id}` : ''}` }] };
+    }
+  );
+
+  // ── Tool 9: accept_counter_offer ─────────────────────────────
+  server.tool(
+    'accept_counter_offer',
+    "Accept the seller's counter-offer from a negotiation. This immediately places the order at the counter price via RabbitMQ.",
+    {
+      negotiation_id: z.number().int().positive().describe('The negotiation ID with a pending counter-offer'),
+      buyer_email:    z.string().email().describe('Your email (must match the negotiation)'),
+    },
+    async ({ negotiation_id, buyer_email }) => {
+      const { rows } = await pool.query(
+        `SELECT n.*, p.name AS product_name FROM negotiations n
+         JOIN products p ON p.id = n.product_id
+         WHERE n.id=$1 AND LOWER(n.buyer_email)=LOWER($2) AND n.status='countered'`,
+        [negotiation_id, buyer_email]
+      );
+      if (!rows.length) return { content: [{ type: 'text', text: 'No active counter-offer found for this negotiation ID and email.' }] };
+      const n = rows[0];
+      const result = await handleNegotiation({
+        product_id: n.product_id, buyer_offer: parseFloat(n.counter_offer),
+        buyer_email, buyer_name: n.buyer_name, quantity: n.quantity, negotiation_id: n.id,
+      });
+      const text = result.status === 'accepted'
+        ? `✅ Counter-offer accepted!\n\nProduct:      ${n.product_name}\nAgreed Price: $${n.counter_offer}/unit × ${n.quantity} = $${(n.counter_offer * n.quantity).toFixed(2)}\nOrder ID:     #${result.order_id}\n\nOrder placed and queued. Use track_order(${result.order_id}) to follow progress.`
+        : `🔄 ${result.message}\n\n${result.next_steps}`;
+      return { content: [{ type: 'text', text }] };
     }
   );
 

@@ -13,3 +13,7 @@ services:
         sync: false
       - key: RABBITMQ_QUEUE
         value: order_staging
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PRICE_FLOOR_PCT
+        value: "0.70"

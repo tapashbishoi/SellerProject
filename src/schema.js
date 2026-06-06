@@ -40,6 +40,29 @@ async function initSchema() {
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS failure_reason TEXT;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS mq_message_id  VARCHAR(100);
 
+      CREATE TABLE IF NOT EXISTS negotiations (
+        id              SERIAL PRIMARY KEY,
+        product_id      INT NOT NULL REFERENCES products(id),
+        buyer_email     VARCHAR(255) NOT NULL,
+        buyer_name      VARCHAR(255),
+        quantity        INT NOT NULL DEFAULT 1,
+        list_price      NUMERIC(10,2) NOT NULL,
+        floor_price     NUMERIC(10,2) NOT NULL,
+        buyer_offer     NUMERIC(10,2) NOT NULL,
+        counter_offer   NUMERIC(10,2),
+        status          VARCHAR(30) DEFAULT 'open',
+        round           INT DEFAULT 1,
+        ai_reasoning    TEXT,
+        ai_message      TEXT,
+        order_id        INT REFERENCES orders(id),
+        created_at      TIMESTAMPTZ DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      ALTER TABLE negotiations ADD COLUMN IF NOT EXISTS buyer_name  VARCHAR(255);
+      ALTER TABLE negotiations ADD COLUMN IF NOT EXISTS ai_reasoning TEXT;
+      ALTER TABLE negotiations ADD COLUMN IF NOT EXISTS order_id    INT REFERENCES orders(id);
+
       CREATE TABLE IF NOT EXISTS order_items (
         id          SERIAL PRIMARY KEY,
         order_id    INT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,

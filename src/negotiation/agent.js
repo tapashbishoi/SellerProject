@@ -1,0 +1,196 @@
+require('dotenv').config();
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const pool = require('../db');
+
+const PRICE_FLOOR_PCT = parseFloat(process.env.PRICE_FLOOR_PCT || '0.70'); // 70% of list price
+
+let gemini = null;
+function getGemini() {
+  if (!gemini) {
+    if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY is not set');
+    gemini = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  }
+  return gemini;
+}
+
+// ── Load buyer history for context ───────────────────────────
+async function getBuyerHistory(buyer_email) {
+  const { rows } = await pool.query(`
+    SELECT COUNT(*) AS total_orders,
+           COALESCE(SUM(total_amount), 0) AS total_spent,
+           MAX(created_at) AS last_order
+    FROM orders
+    WHERE LOWER(buyer_email) = LOWER($1)
+      AND status NOT IN ('failed','cancelled')
+  `, [buyer_email]);
+  return rows[0];
+}
+
+// ── Gemini negotiation evaluator ─────────────────────────────
+async function evaluateOffer({ product, quantity, buyer_offer, floor_price, buyer_history, round, previous_counter }) {
+  const model = getGemini().getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+  const prompt = `You are a professional sales negotiation agent for a stationery business.
+
+PRODUCT DETAILS:
+- Name: ${product.name}
+- Category: ${product.category}
+- List Price: $${product.price} per ${product.unit}
+- Minimum Acceptable Price (floor): $${floor_price.toFixed(2)} per unit
+- Quantity requested: ${quantity} unit(s)
+- Total at list price: $${(product.price * quantity).toFixed(2)}
+
+BUYER DETAILS:
+- Email: ${product.buyer_email || 'unknown'}
+- Previous orders: ${buyer_history.total_orders}
+- Total spent with us: $${parseFloat(buyer_history.total_spent).toFixed(2)}
+- Last order: ${buyer_history.last_order ? new Date(buyer_history.last_order).toLocaleDateString() : 'First time buyer'}
+
+NEGOTIATION:
+- Round: ${round}
+- Buyer's offer: $${buyer_offer} per unit (total: $${(buyer_offer * quantity).toFixed(2)})
+${previous_counter ? `- Our previous counter-offer was: $${previous_counter} per unit` : ''}
+
+RULES:
+1. NEVER accept below the floor price of $${floor_price.toFixed(2)} per unit
+2. For loyal buyers (3+ orders or $500+ spent), you may offer up to 5% extra discount
+3. For large orders (50+ units), you may go closer to floor price
+4. If the buyer's offer is at or above list price, accept immediately
+5. If the buyer is offering below floor, REJECT with a clear reason and a fair counter-offer
+6. On round 3+, be firmer — state this is your best and final offer
+7. Always be professional and friendly
+
+Respond in this EXACT JSON format (no markdown, just JSON):
+{
+  "decision": "accept" | "counter" | "reject",
+  "counter_price": <number or null — your counter-offer per unit, null if accepting>,
+  "message": "<friendly professional message to the buyer — 2-3 sentences>",
+  "reasoning": "<internal reasoning — why you made this decision>"
+}`;
+
+  const result = await model.generateContent(prompt);
+  const text = result.response.text().trim();
+
+  // Strip markdown code fences if present
+  const clean = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+  return JSON.parse(clean);
+}
+
+// ── Main negotiation handler ──────────────────────────────────
+async function handleNegotiation({ product_id, buyer_offer, buyer_email, buyer_name, quantity = 1, negotiation_id = null }) {
+  // Load product
+  const { rows: pRows } = await pool.query(
+    `SELECT p.*, i.quantity AS stock FROM products p JOIN inventory i ON i.product_id = p.id WHERE p.id = $1`,
+    [product_id]
+  );
+  if (!pRows.length) throw new Error(`Product ID ${product_id} not found`);
+  const product = pRows[0];
+
+  // Check stock
+  if (product.stock < quantity) {
+    return {
+      status: 'rejected',
+      reason: `Insufficient stock. Only ${product.stock} unit(s) available, you requested ${quantity}.`,
+      negotiation_id: null,
+    };
+  }
+
+  const list_price  = parseFloat(product.price);
+  const floor_price = parseFloat((list_price * PRICE_FLOOR_PCT).toFixed(2));
+
+  // Load buyer history
+  const buyer_history = await getBuyerHistory(buyer_email);
+
+  // Load existing negotiation if continuing
+  let round = 1;
+  let previous_counter = null;
+  let existing = null;
+
+  if (negotiation_id) {
+    const { rows: nRows } = await pool.query(
+      `SELECT * FROM negotiations WHERE id = $1 AND buyer_email = $2`,
+      [negotiation_id, buyer_email]
+    );
+    if (nRows.length) {
+      existing = nRows[0];
+      round = existing.round + 1;
+      previous_counter = existing.counter_offer;
+    }
+  }
+
+  // Ask Gemini to evaluate
+  product.buyer_email = buyer_email;
+  const ai = await evaluateOffer({ product, quantity, buyer_offer, floor_price, buyer_history, round, previous_counter });
+
+  // Determine final status
+  let status = ai.decision === 'accept' ? 'accepted' : ai.decision === 'reject' ? 'rejected' : 'countered';
+  const agreed_price = ai.decision === 'accept' ? buyer_offer : null;
+  const counter_price = ai.counter_price || null;
+
+  // Save negotiation to DB
+  let negId;
+  if (existing) {
+    await pool.query(
+      `UPDATE negotiations
+       SET buyer_offer=$1, counter_offer=$2, status=$3, round=$4,
+           ai_reasoning=$5, ai_message=$6, updated_at=NOW()
+       WHERE id=$7`,
+      [buyer_offer, counter_price, status, round, ai.reasoning, ai.message, negotiation_id]
+    );
+    negId = negotiation_id;
+  } else {
+    const { rows } = await pool.query(
+      `INSERT INTO negotiations
+         (product_id, buyer_email, buyer_name, quantity, list_price, floor_price,
+          buyer_offer, counter_offer, status, round, ai_reasoning, ai_message)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      [product_id, buyer_email, buyer_name, quantity, list_price, floor_price,
+       buyer_offer, counter_price, status, round, ai.reasoning, ai.message]
+    );
+    negId = rows[0].id;
+  }
+
+  // If accepted, auto-stage the order via MQ
+  let order_id = null;
+  if (ai.decision === 'accept') {
+    const { publishOrder } = require('../mq/publisher');
+    // Create the order with the agreed price
+    const { rows: oRows } = await pool.query(
+      `INSERT INTO orders (buyer_name, buyer_email, notes, status)
+       VALUES ($1,$2,$3,'queued') RETURNING id, created_at`,
+      [buyer_name || buyer_email, buyer_email, `Negotiated price: $${buyer_offer}/unit (list: $${list_price})`]
+    );
+    order_id = oRows[0].id;
+
+    const messageId = await publishOrder({
+      staged_order_id: order_id,
+      buyer_name: buyer_name || buyer_email,
+      buyer_email,
+      notes: `Negotiated price: $${buyer_offer}/unit`,
+      items: [{ product_id, quantity, negotiated_price: buyer_offer }],
+    });
+    await pool.query(`UPDATE orders SET mq_message_id=$1 WHERE id=$2`, [messageId, order_id]);
+    await pool.query(`UPDATE negotiations SET order_id=$1 WHERE id=$2`, [order_id, negId]);
+  }
+
+  return {
+    negotiation_id: negId,
+    status,
+    round,
+    product:        product.name,
+    list_price,
+    floor_price,
+    your_offer:     buyer_offer,
+    counter_offer:  counter_price,
+    agreed_price,
+    message:        ai.message,
+    order_id,
+    next_steps: status === 'accepted'
+      ? `Order #${order_id} has been placed. Track it with track_order(${order_id})`
+      : status === 'countered'
+      ? `Call negotiate_price again with negotiation_id=${negId} and your new offer`
+      : 'Negotiation closed. You may start a new negotiation with a higher offer.',
+  };
+}
+
+module.exports = { handleNegotiation };
