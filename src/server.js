@@ -20,9 +20,10 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
 // Swagger docs — no API key needed to read the docs
+app.get('/docs/spec.json', (req, res) => res.json(swaggerSpec));
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customSiteTitle: 'Seller API Docs',
-  swaggerOptions: { persistAuthorization: true },
+  swaggerOptions: { persistAuthorization: true, url: '/docs/spec.json' },
 }));
 
 // MCP server for buyers — mounted BEFORE api key middleware (has its own auth)
