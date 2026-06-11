@@ -62,6 +62,7 @@ app.use('/api/inventory', require('./routes/inventory'));
 app.use('/api/orders',    require('./routes/orders'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/buyers',    require('./routes/buyers'));
+app.use('/api/dc',        require('./routes/dc'));
 
 // Health check — shows DB + MQ status
 app.get('/api/health', async (req, res) => {

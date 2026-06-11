@@ -44,6 +44,9 @@ router.get('/', async (req, res) => {
   const { status } = req.query;
   let query = `
     SELECT o.*,
+      dc.name    AS dc_name,
+      dc.dc_code AS dc_code,
+      dc.city    AS dc_city,
       json_agg(json_build_object(
         'product_id', oi.product_id,
         'product_name', p.name,
@@ -54,11 +57,12 @@ router.get('/', async (req, res) => {
     FROM orders o
     LEFT JOIN order_items oi ON oi.order_id = o.id
     LEFT JOIN products p ON p.id = oi.product_id
+    LEFT JOIN distribution_centers dc ON dc.id = o.assigned_dc_id
     WHERE 1=1
   `;
   const params = [];
   if (status) { params.push(status); query += ` AND o.status = $${params.length}`; }
-  query += ' GROUP BY o.id ORDER BY o.created_at DESC';
+  query += ' GROUP BY o.id, dc.name, dc.dc_code, dc.city ORDER BY o.created_at DESC';
   const { rows } = await pool.query(query, params);
   res.json(rows);
 });
@@ -67,6 +71,10 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   const { rows } = await pool.query(`
     SELECT o.*,
+      dc.name     AS dc_name,
+      dc.dc_code  AS dc_code,
+      dc.city     AS dc_city,
+      dc.state    AS dc_state,
       json_agg(json_build_object(
         'product_id', oi.product_id,
         'product_name', p.name,
@@ -77,8 +85,9 @@ router.get('/:id', async (req, res) => {
     FROM orders o
     LEFT JOIN order_items oi ON oi.order_id = o.id
     LEFT JOIN products p ON p.id = oi.product_id
+    LEFT JOIN distribution_centers dc ON dc.id = o.assigned_dc_id
     WHERE o.id = $1
-    GROUP BY o.id
+    GROUP BY o.id, dc.name, dc.dc_code, dc.city, dc.state
   `, [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Order not found' });
   res.json(rows[0]);

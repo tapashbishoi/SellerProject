@@ -122,6 +122,7 @@
   <button onclick="switchTab('catalogue')">Catalogue</button>
   <button onclick="switchTab('inventory')">Inventory</button>
   <button onclick="switchTab('orders')">Orders</button>
+  <button onclick="switchTab('dc')">🏭 DC & Shipping</button>
   <button onclick="switchTab('analytics')">📊 AI Analytics</button>
   <button onclick="switchTab('api')">API Docs</button>
 </nav>
@@ -133,11 +134,15 @@
     <div class="stat-box"><div class="num" id="stat-orders">—</div><div class="lbl">Total Orders</div></div>
     <div class="stat-box"><div class="num" id="stat-revenue">—</div><div class="lbl">Total Revenue ($)</div></div>
     <div class="stat-box"><div class="num" id="stat-low">—</div><div class="lbl">Low / Out of Stock</div></div>
+    <div class="stat-box"><div class="num" id="stat-dc-east" style="color:#1a73e8">—</div><div class="lbl">US East DC Orders</div></div>
+    <div class="stat-box"><div class="num" id="stat-dc-west" style="color:#34a853">—</div><div class="lbl">US West DC Orders</div></div>
+    <div class="stat-box"><div class="num" id="stat-dc-central" style="color:#ff6d00">—</div><div class="lbl">US Central DC Orders</div></div>
+    <div class="stat-box"><div class="num" id="stat-unassigned" style="color:#ea4335">—</div><div class="lbl">Unassigned to DC</div></div>
   </div>
   <div class="card">
     <h2>Recent Orders</h2>
     <table>
-      <thead><tr><th>#</th><th>Buyer</th><th>Items</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+      <thead><tr><th>#</th><th>Buyer</th><th>Items</th><th>Amount</th><th>DC</th><th>Status</th><th>Date</th></tr></thead>
       <tbody id="dash-orders"></tbody>
     </table>
   </div>
@@ -177,11 +182,19 @@
 <div id="tab-inventory" class="tab-content">
   <div class="section-header">
     <h2>Inventory Management</h2>
-    <button class="btn btn-success" onclick="loadInventory()">↻ Refresh</button>
+    <div style="display:flex;gap:10px;">
+      <select id="inv-dc-filter" onchange="loadInventory()" style="border:1px solid #ddd;border-radius:6px;padding:7px 12px;font-size:0.88rem;">
+        <option value="">🌐 Global (All DCs)</option>
+        <option value="US_EAST">🔵 US East DC</option>
+        <option value="US_WEST">🟢 US West DC</option>
+        <option value="US_CENTRAL">🟠 US Central DC</option>
+      </select>
+      <button class="btn btn-success" onclick="loadInventory()">↻ Refresh</button>
+    </div>
   </div>
   <div class="card" style="padding:0;overflow:hidden;">
     <table>
-      <thead><tr><th>Product</th><th>Category</th><th>Price ($)</th><th>Stock Qty</th><th>Low Threshold</th><th>Status</th><th>Last Updated</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Product</th><th>Category</th><th>Price ($)</th><th>DC</th><th>Stock Qty</th><th>Low Threshold</th><th>Status</th><th>Last Updated</th><th>Actions</th></tr></thead>
       <tbody id="inventory-body"></tbody>
     </table>
   </div>
@@ -202,13 +215,55 @@
   </div>
   <div class="card" style="padding:0;overflow:hidden;">
     <table>
-      <thead><tr><th>#</th><th>Buyer</th><th>Contact</th><th>Items</th><th>Total ($)</th><th>Status</th><th>Channel</th><th>Date</th><th>Actions</th></tr></thead>
+      <thead><tr><th>#</th><th>Buyer</th><th>Contact</th><th>Items</th><th>Total ($)</th><th>Status</th><th>Channel</th><th>DC</th><th>Ship To</th><th>Date</th><th>Actions</th></tr></thead>
       <tbody id="orders-body"></tbody>
     </table>
   </div>
 </div>
 
 <!-- API DOCS -->
+<!-- DC & SHIPPING -->
+<div id="tab-dc" class="tab-content">
+  <div class="section-header">
+    <h2>Distribution Centers & Shipping</h2>
+    <button class="btn btn-success" onclick="loadDC()">↻ Refresh</button>
+  </div>
+
+  <!-- DC stat cards -->
+  <div id="dc-cards" class="grid-3" style="margin-bottom:24px;"></div>
+
+  <!-- DC inventory drill-down -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h2>📦 Inventory per DC</h2>
+      <select id="dc-inv-select" onchange="loadDCInventory()" style="border:1px solid #ddd;border-radius:6px;padding:7px 14px;font-size:0.88rem;">
+        <option value="">— Select a DC —</option>
+      </select>
+    </div>
+    <table>
+      <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Threshold</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="dc-inventory-body"><tr><td colspan="7" style="text-align:center;color:#888;padding:20px;">Select a DC above to view its inventory</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Orders by DC -->
+  <div class="card" style="margin-top:20px;">
+    <h2>🚚 Orders by DC</h2>
+    <div style="display:flex;gap:10px;margin-bottom:14px;">
+      <select id="dc-orders-filter" onchange="loadDCOrders()" style="border:1px solid #ddd;border-radius:6px;padding:7px 12px;font-size:0.88rem;">
+        <option value="">All DCs</option>
+        <option value="US_EAST">US East DC</option>
+        <option value="US_WEST">US West DC</option>
+        <option value="US_CENTRAL">US Central DC</option>
+      </select>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>DC</th><th>Buyer</th><th>Ship To</th><th>Est. Days</th><th>Shipping $</th><th>Total $</th><th>Channel</th><th>Status</th><th>Date</th></tr></thead>
+      <tbody id="dc-orders-body"></tbody>
+    </table>
+  </div>
+</div>
+
 <!-- AI ANALYTICS -->
 <div id="tab-analytics" class="tab-content">
   <div class="section-header">
@@ -463,6 +518,7 @@ function switchTab(name) {
   if (name === 'catalogue') loadCatalogue();
   if (name === 'inventory') loadInventory();
   if (name === 'orders')    loadOrders();
+  if (name === 'dc')        loadDC();
   if (name === 'analytics') loadAnalytics();
 }
 
@@ -501,6 +557,18 @@ async function loadDashboard() {
   const alerts = inv.filter(i => i.stock_status !== 'in_stock');
   document.getElementById('stat-low').textContent = alerts.length;
 
+  // DC order counts
+  try {
+    const dcData = await fetch(`${API}/dc`, {headers:H}).then(r => r.json());
+    const dcMap  = {};
+    dcData.forEach(d => dcMap[d.dc_code] = d);
+    document.getElementById('stat-dc-east').textContent    = dcMap['US_EAST']?.active_orders    || 0;
+    document.getElementById('stat-dc-west').textContent    = dcMap['US_WEST']?.active_orders    || 0;
+    document.getElementById('stat-dc-central').textContent = dcMap['US_CENTRAL']?.active_orders || 0;
+    const unassigned = orders.filter(o => !o.assigned_dc_id && !['failed','cancelled','rejected'].includes(o.status)).length;
+    document.getElementById('stat-unassigned').textContent = unassigned;
+  } catch (_) {}
+
   // Recent 10 orders
   const tbody = document.getElementById('dash-orders');
   tbody.innerHTML = orders.slice(0, 10).map(o => `
@@ -509,6 +577,7 @@ async function loadDashboard() {
       <td>${o.buyer_name}</td>
       <td>${(o.items||[]).filter(Boolean).length} item(s)</td>
       <td>$${fmt(o.total_amount)}</td>
+      <td>${dcBadge(o.dc_name || o.assigned_dc_id)}</td>
       <td>${badge(o.status)}</td>
       <td>${fmtDate(o.created_at)}</td>
     </tr>`).join('');
@@ -607,7 +676,20 @@ async function deleteProduct(id, name) {
 
 // ── INVENTORY ─────────────────────────────────────────────────
 async function loadInventory() {
-  const inv = await fetch(`${API}/inventory`, {headers:H}).then(r => r.json());
+  const dcCode = document.getElementById('inv-dc-filter')?.value || '';
+
+  let inv;
+  if (dcCode) {
+    // Find DC id from dcList or fetch
+    const dcs = await fetch(`${API}/dc`, {headers:H}).then(r => r.json());
+    const dc  = dcs.find(d => d.dc_code === dcCode);
+    if (!dc) return;
+    inv = await fetch(`${API}/dc/${dc.id}/inventory`, {headers:H}).then(r => r.json());
+    inv = inv.map(i => ({ ...i, dc_name: dc.name, dc_code: dc.dc_code, dc_id: dc.id }));
+  } else {
+    inv = await fetch(`${API}/inventory`, {headers:H}).then(r => r.json());
+  }
+
   productCache = inv;
   const tbody = document.getElementById('inventory-body');
   tbody.innerHTML = inv.map(i => `
@@ -615,11 +697,17 @@ async function loadInventory() {
       <td><b>${i.name}</b></td>
       <td>${i.category || '—'}</td>
       <td>$${fmt(i.price)}</td>
+      <td>${i.dc_name ? dcBadge(i.dc_code) : '<span style="color:#aaa;font-size:0.78rem;">All DCs</span>'}</td>
       <td><b style="font-size:1.1rem;">${i.quantity}</b></td>
       <td>${i.low_stock_threshold}</td>
       <td>${badge(i.stock_status)}</td>
-      <td style="font-size:0.8rem;color:#888;">${fmtDate(i.updated_at)}</td>
-      <td><button class="btn btn-sm btn-success" onclick="openStockModal(${i.product_id},'${i.name}',${i.quantity},${i.low_stock_threshold})">Update Stock</button></td>
+      <td style="font-size:0.8rem;color:#888;">${i.updated_at ? fmtDate(i.updated_at) : '—'}</td>
+      <td>
+        ${i.dc_id
+          ? `<button class="btn btn-sm btn-success" onclick="openDCStockModal(${i.dc_id},'${i.dc_name}',${i.product_id},'${i.name}',${i.quantity},${i.low_stock_threshold})">Update</button>`
+          : `<button class="btn btn-sm btn-success" onclick="openStockModal(${i.product_id},'${i.name}',${i.quantity},${i.low_stock_threshold})">Update Stock</button>`
+        }
+      </td>
     </tr>`).join('');
 }
 
@@ -637,6 +725,25 @@ async function saveStock() {
   const qty       = document.getElementById('stock-qty').value;
   const add       = document.getElementById('stock-add').value;
   const threshold = document.getElementById('stock-threshold').value;
+
+  // DC-specific update (from DC inventory tab)
+  if (window._dcStockOverride) {
+    const { dcId } = window._dcStockOverride;
+    window._dcStockOverride = null;
+    const body = {};
+    if (qty !== '')       body.quantity            = parseInt(qty);
+    if (add !== '')       body.quantity            = (parseInt(qty)||0) + parseInt(add); // simple add
+    if (threshold !== '') body.low_stock_threshold = parseInt(threshold);
+    if (!Object.keys(body).length) return toast('Enter a quantity', 'error');
+    const res = await fetch(`${API}/dc/${dcId}/inventory/${productId}`, {
+      method: 'PATCH', headers: H, body: JSON.stringify(body)
+    });
+    if (!res.ok) { const e = await res.json(); return toast(e.error, 'error'); }
+    toast('DC stock updated');
+    closeModal('modal-stock');
+    loadDCInventory();
+    return;
+  }
 
   if (add && parseInt(add) > 0) {
     const res = await fetch(`${API}/inventory/${productId}/restock`, {
@@ -683,6 +790,8 @@ async function loadOrders() {
       <td>$${fmt(o.total_amount)}</td>
       <td>${badge(o.status)}</td>
       <td>${chBadge(o.channel)}</td>
+      <td>${o.dc_code ? dcBadge(o.dc_code) : '<span style="color:#aaa;font-size:0.78rem;">—</span>'}</td>
+      <td style="font-size:0.82rem;">${o.shipping_city ? o.shipping_city+', '+o.shipping_state : '—'}</td>
       <td style="font-size:0.82rem;">${fmtDate(o.created_at)}</td>
       <td>
         <button class="btn btn-sm btn-primary" onclick="viewOrder(${o.id})">View</button>
@@ -694,7 +803,7 @@ async function loadOrders() {
           </select>` : ''}
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="9" style="text-align:center;padding:20px;color:#888;">No orders found</td></tr>';
+  }).join('') || '<tr><td colspan="11" style="text-align:center;padding:20px;color:#888;">No orders found</td></tr>';
 }
 
 async function changeStatus(id, status, el) {
@@ -720,6 +829,8 @@ async function viewOrder(id) {
     <p><b>Buyer:</b> ${o.buyer_name}</p>
     <p><b>Email:</b> ${o.buyer_email || '—'} &nbsp; <b>Phone:</b> ${o.buyer_phone || '—'}</p>
     <p style="margin-top:6px;"><b>Status:</b> ${badge(o.status)} &nbsp; <b>Channel:</b> ${chBadge(o.channel)} &nbsp; <b>Date:</b> ${fmtDate(o.created_at)}</p>
+    ${o.dc_code ? `<p style="margin-top:4px;">📦 <b>Fulfilling DC:</b> ${dcBadge(o.dc_code)} &nbsp; <b>Est. Delivery:</b> ${o.shipping_days ? o.shipping_days + ' days' : '—'} &nbsp; <b>Shipping:</b> ${o.shipping_cost ? '$' + fmt(o.shipping_cost) : '—'}</p>` : ''}
+    ${o.shipping_city ? `<p style="margin-top:4px;">🚚 <b>Ship to:</b> ${[o.shipping_name, o.shipping_street, o.shipping_city, o.shipping_state, o.shipping_zip].filter(Boolean).join(', ')}</p>` : ''}
     ${o.notes ? `<p style="margin-top:4px;"><b>Notes:</b> ${o.notes}</p>` : ''}
     <table style="margin-top:14px;">
       <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
@@ -811,6 +922,100 @@ async function submitOrder() {
       toast(`Order #${data.order_id} is still processing — refresh to check status`);
     }
   }, 2000);
+}
+
+// ── DC HELPERS ────────────────────────────────────────────────
+const DC_COLORS = { US_EAST:'#1a73e8', US_WEST:'#34a853', US_CENTRAL:'#ff6d00' };
+const DC_LABELS = { US_EAST:'🔵 US East', US_WEST:'🟢 US West', US_CENTRAL:'🟠 US Central' };
+
+function dcBadge(dcCodeOrName) {
+  if (!dcCodeOrName) return '<span style="color:#aaa;font-size:0.8rem;">—</span>';
+  // Match by code
+  const code = Object.keys(DC_COLORS).find(k => dcCodeOrName?.toString().includes(k.replace('US_','')));
+  const color = DC_COLORS[code] || '#9e9e9e';
+  const label = DC_LABELS[code] || dcCodeOrName;
+  return `<span style="padding:2px 8px;border-radius:10px;font-size:0.78rem;font-weight:600;background:${color}22;color:${color};border:1px solid ${color}44">${label}</span>`;
+}
+
+// ── DC & SHIPPING TAB ─────────────────────────────────────────
+let dcList = [];
+
+async function loadDC() {
+  const dcs = await fetch(`${API}/dc`, {headers:H}).then(r => r.json());
+  dcList = dcs;
+
+  // Stat cards
+  document.getElementById('dc-cards').innerHTML = dcs.map(dc => `
+    <div class="stat-box" style="border-top:4px solid ${DC_COLORS[dc.dc_code]||'#9e9e9e'};">
+      <div style="font-size:0.9rem;font-weight:700;color:${DC_COLORS[dc.dc_code]||'#555'};margin-bottom:8px;">${dc.name}</div>
+      <div style="font-size:0.82rem;color:#888;margin-bottom:12px;">📍 ${dc.city}, ${dc.state}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center;">
+        <div><div class="num" style="font-size:1.4rem;color:${DC_COLORS[dc.dc_code]}">${dc.active_orders}</div><div class="lbl">Orders</div></div>
+        <div><div class="num" style="font-size:1.4rem;color:#34a853">$${fmt(dc.total_revenue)}</div><div class="lbl">Revenue</div></div>
+      </div>
+      <div style="margin-top:10px;font-size:0.82rem;color:#666;">📦 ${dc.total_stock_units} units in stock</div>
+    </div>`).join('');
+
+  // Populate DC select for inventory drill-down
+  const sel = document.getElementById('dc-inv-select');
+  sel.innerHTML = '<option value="">— Select a DC —</option>' +
+    dcs.map(dc => `<option value="${dc.id}">${dc.name} (${dc.city})</option>`).join('');
+
+  loadDCOrders();
+}
+
+async function loadDCInventory() {
+  const dcId = document.getElementById('dc-inv-select').value;
+  if (!dcId) return;
+  const inv  = await fetch(`${API}/dc/${dcId}/inventory`, {headers:H}).then(r => r.json());
+  const dc   = dcList.find(d => d.id == dcId);
+
+  document.getElementById('dc-inventory-body').innerHTML = inv.map(i => `
+    <tr>
+      <td><b>${i.name}</b></td>
+      <td>${i.category||'—'}</td>
+      <td>$${fmt(i.price)}</td>
+      <td><b style="font-size:1.05rem;">${i.quantity}</b></td>
+      <td>${i.low_stock_threshold}</td>
+      <td><span class="badge badge-${i.stock_status}">${i.stock_status.replace('_',' ')}</span></td>
+      <td>
+        <button class="btn btn-sm btn-success"
+          onclick="openDCStockModal(${dcId},'${dc?.name}',${i.product_id},'${i.name}',${i.quantity},${i.low_stock_threshold})">
+          Update
+        </button>
+      </td>
+    </tr>`).join('');
+}
+
+function openDCStockModal(dcId, dcName, productId, productName, qty, threshold) {
+  document.getElementById('stock-product-id').value       = productId;
+  document.getElementById('stock-product-name').textContent = `${productName} @ ${dcName}`;
+  document.getElementById('stock-qty').value              = '';
+  document.getElementById('stock-add').value              = '';
+  document.getElementById('stock-threshold').value        = threshold;
+  // Override save to use DC endpoint
+  window._dcStockOverride = { dcId, productId };
+  openModal('modal-stock');
+}
+
+async function loadDCOrders() {
+  const filterCode = document.getElementById('dc-orders-filter')?.value || '';
+  const rows       = await fetch(`${API}/dc/orders/by-dc`, {headers:H}).then(r => r.json());
+  const filtered   = filterCode ? rows.filter(r => r.dc_code === filterCode) : rows;
+
+  document.getElementById('dc-orders-body').innerHTML = filtered.map(o => `
+    <tr>
+      <td>#${o.id}</td>
+      <td>${dcBadge(o.dc_code)}</td>
+      <td style="font-size:0.85rem;"><b>${o.buyer_name}</b>${o.buyer_email ? `<br><span style="color:#888">${o.buyer_email}</span>` : ''}</td>
+      <td style="font-size:0.82rem;">${[o.shipping_city, o.shipping_state].filter(Boolean).join(', ') || '—'}</td>
+      <td style="text-align:center;">${o.shipping_days ? `${o.shipping_days} days` : '—'}</td>
+      <td>${o.shipping_cost ? `$${fmt(o.shipping_cost)}` : '—'}</td>
+      <td>$${fmt(o.total_amount)}</td>
+      <td>${(() => { const c={ui:'#1a73e8',api:'#34a853',mcp:'#9c27b0',negotiation:'#ff6d00'}; return `<span style="padding:2px 7px;border-radius:10px;font-size:0.75rem;font-weight:600;background:${c[o.channel]||'#eee'}22;color:${c[o.channel]||'#555'}">${o.channel||'—'}</span>`; })()}</td>
+      <td><span class="badge badge-${o.status}">${o.status}</span></td>
+      <td style="font-size:0.8rem;">${fmtDate(o.created_at)}</td>
+    </tr>`).join('') || '<tr><td colspan="10" style="text-align:center;padding:20px;color:#888;">No orders assigned to DCs yet</td></tr>';
 }
 
 // ── ANALYTICS ─────────────────────────────────────────────────
