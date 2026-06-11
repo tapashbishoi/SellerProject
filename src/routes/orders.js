@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const { publishOrder } = require('../mq/publisher');
+const { publishEDI } = require('../edi/mq');
 
 // POST /api/orders/stage — buyer submits order → goes to RabbitMQ for validation
 router.post('/stage', async (req, res) => {
@@ -164,6 +165,20 @@ router.patch('/:id/status', async (req, res) => {
       [status, req.params.id]
     );
     await client.query('COMMIT');
+
+    // Publish EDI order event for EDI-sourced orders → triggers 855/856/810
+    const updatedOrder = rows[0];
+    if (updatedOrder.channel === 'edi' && updatedOrder.edi_partner_id) {
+      const ediEventMap = { confirmed: 'order.confirmed', shipped: 'order.shipped', delivered: 'order.delivered' };
+      if (ediEventMap[status]) {
+        publishEDI(`edi.${ediEventMap[status]}`, {
+          event:    ediEventMap[status],
+          order_id: updatedOrder.id,
+          status,
+        }).catch(err => console.warn('[EDI] Failed to publish order event:', err.message));
+      }
+    }
+
     res.json(rows[0]);
   } catch (e) {
     await client.query('ROLLBACK');

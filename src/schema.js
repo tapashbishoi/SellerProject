@@ -111,6 +111,42 @@ async function initSchema() {
         created_at    TIMESTAMPTZ DEFAULT NOW(),
         updated_at    TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS edi_trading_partners (
+        id              SERIAL PRIMARY KEY,
+        partner_id      VARCHAR(50) UNIQUE NOT NULL,
+        company_name    VARCHAR(255) NOT NULL,
+        buyer_email     VARCHAR(255),
+        isa_qualifier   VARCHAR(2)   DEFAULT 'ZZ',
+        isa_id          VARCHAR(15)  NOT NULL,
+        gs_id           VARCHAR(15)  NOT NULL,
+        as2_id          VARCHAR(128),
+        callback_url    VARCHAR(500),
+        edi_version     VARCHAR(10)  DEFAULT '00501',
+        is_active       BOOLEAN      DEFAULT true,
+        notes           TEXT,
+        created_at      TIMESTAMPTZ  DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ  DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS edi_messages (
+        id              SERIAL PRIMARY KEY,
+        direction       VARCHAR(10)  NOT NULL,
+        transaction_set VARCHAR(10)  NOT NULL,
+        isa_control_no  VARCHAR(20),
+        gs_control_no   VARCHAR(10),
+        st_control_no   VARCHAR(10),
+        partner_id      VARCHAR(50),
+        raw_edi         TEXT,
+        parsed_json     JSONB,
+        status          VARCHAR(30)  DEFAULT 'received',
+        error_detail    TEXT,
+        order_id        INT          REFERENCES orders(id),
+        po_number       VARCHAR(50),
+        related_msg_id  INT          REFERENCES edi_messages(id),
+        created_at      TIMESTAMPTZ  DEFAULT NOW(),
+        processed_at    TIMESTAMPTZ
+      );
     `);
 
     // ── Phase 2: Add columns to existing tables (safe upgrades) ──
@@ -130,6 +166,9 @@ async function initSchema() {
       ALTER TABLE negotiations ADD COLUMN IF NOT EXISTS buyer_name    VARCHAR(255);
       ALTER TABLE negotiations ADD COLUMN IF NOT EXISTS ai_reasoning  TEXT;
       ALTER TABLE negotiations ADD COLUMN IF NOT EXISTS order_id      INT REFERENCES orders(id);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS edi_po_number     VARCHAR(50);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS edi_partner_id    VARCHAR(50);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS edi_message_id    INT REFERENCES edi_messages(id);
     `);
 
     console.log('Database schema initialised');

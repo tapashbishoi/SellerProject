@@ -572,6 +572,198 @@ ${n.order_id ? `Order placed:  #${n.order_id}` : ''}` }] };
     }
   );
 
+  // ── Tool 13: get_edi_guidelines ──────────────────────────────
+  server.tool(
+    'get_edi_guidelines',
+    'Get the complete EDI setup guide — our ISA/GS IDs, required 850 segments, what we send back (997/855/856/810), and example X12 payload.',
+    {},
+    async () => {
+      const base = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+      const { rows: products } = await pool.query(`SELECT id, name, price FROM products ORDER BY name LIMIT 10`);
+      const productList = products.map(p => `  VP*${p.id} → "${p.name}" @ $${p.price}`).join('\n');
+
+      return { content: [{ type: 'text', text: `📋 EDI Trading Partner Setup Guide
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🏢 Our EDI Identity
+  ISA Receiver ID:   ${process.env.EDI_ISA_ID || 'SELLERAGENT'} (qualifier: ZZ)
+  AS2 ID:            ${process.env.EDI_AS2_ID || 'SELLERAGENT-AS2'}
+  EDI Version:       X12 005010 (00501)
+  Segment separator: ~
+  Element separator: *
+
+📨 Inbound Endpoints
+  HTTPS: POST ${base}/edi/receive    (Content-Type: application/edi-x12)
+  AS2:   POST ${base}/edi/as2        (AS2-From / AS2-To headers required)
+
+📦 Required 850 Segments
+  ISA: your ISA ID (ISA06) → our ISA ID ${process.env.EDI_ISA_ID || 'SELLERAGENT'} (ISA08)
+  BEG: BEG01=00, BEG02=SA, BEG03=<your-PO-number>, BEG05=<YYYYMMDD>
+  N1*ST: Ship-to name → N3 street → N4 city/state/zip (required for DC routing)
+  PO1: PO102=qty, PO103=EA, PO104=unit_price, PO106=VP, PO107=<product_id>
+  CTT: total line count
+  SE/GE/IEA: standard X12 trailers
+
+🔑 Our Product IDs (use in PO107 with PO106=VP):
+${productList}
+  → Full list: GET ${base}/api/products?category=Pen (use X-API-Key header)
+
+📤 What We Send Back
+  997 Functional Ack:     Immediately on receipt (accepted/rejected)
+  855 PO Acknowledgment:  When order is confirmed (async, ~2-5 seconds)
+  856 Ship Notice (ASN):  When order status → shipped
+  810 Invoice:            When order status → delivered
+
+📝 Minimal 850 Example (10x Blue Ball Pen, ship to NY)
+ISA*00*          *00*          *ZZ*YOURCOMPANY    *ZZ*${(process.env.EDI_ISA_ID || 'SELLERAGENT').padEnd(15)}*230101*1200*^*00501*000000001*0*P*:~
+GS*PO*YOURCOMPANY*${process.env.EDI_ISA_ID || 'SELLERAGENT'}*20230101*1200*1*X*005010~
+ST*850*0001~
+BEG*00*SA*PO12345**20230101~
+N1*ST*Acme Corp*92*BUYER001~
+N3*123 Main St~
+N4*New York*NY*10001*US~
+PO1*1*10*EA*10.00*PE*VP*9~
+CTT*1~
+SE*9*0001~
+GE*1*1~
+IEA*1*000000001~
+
+🔄 Register as trading partner first:
+  POST ${base}/edi/partners
+  { "partner_id": "YOURCO", "company_name": "Your Co", "isa_id": "YOURCOMPANY",
+    "gs_id": "YOURCOMPANY", "callback_url": "https://your-edi-endpoint.com/receive" }` }] };
+    }
+  );
+
+  // ── Tool 14: send_edi_850 ────────────────────────────────────
+  server.tool(
+    'send_edi_850',
+    'Send an EDI 850 Purchase Order. Accepts either raw X12 string OR structured JSON (we convert to X12). Returns the EDI message ID — use check_edi_status to track 997/855/856 responses.',
+    {
+      mode:          z.enum(['raw_x12','structured']).describe('raw_x12 = send X12 string directly | structured = provide JSON, we build X12'),
+      raw_x12:       z.string().optional().describe('Complete raw X12 EDI 850 string (required if mode=raw_x12)'),
+      partner_id:    z.string().describe('Your registered EDI partner ID'),
+      po_number:     z.string().optional().describe('Your PO number (required if mode=structured)'),
+      items:         z.array(z.object({
+        product_id: z.number().int().positive().describe('Our product ID (from browse_catalogue)'),
+        quantity:   z.number().int().positive(),
+        unit_price: z.number().positive().optional().describe('Proposed unit price (optional — list price used if omitted)'),
+      })).optional().describe('Order line items (required if mode=structured)'),
+      shipping_name:    z.string().optional(),
+      shipping_street:  z.string().optional(),
+      shipping_city:    z.string().optional(),
+      shipping_state:   z.string().optional().describe('2-letter US state code'),
+      shipping_zip:     z.string().optional(),
+    },
+    async ({ mode, raw_x12, partner_id, po_number, items, shipping_name, shipping_street, shipping_city, shipping_state, shipping_zip }) => {
+      const base = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+      const apiKey = (process.env.API_KEYS || '').split(',')[0];
+
+      let ediPayload = raw_x12;
+
+      if (mode === 'structured') {
+        if (!po_number || !items?.length || !shipping_state)
+          return { content: [{ type: 'text', text: '❌ structured mode requires: po_number, items[], shipping_state' }] };
+
+        // Build minimal X12 850 from structured input
+        const { rows: products } = await pool.query(
+          `SELECT id, name, price FROM products WHERE id = ANY($1)`,
+          [items.map(i => i.product_id)]
+        );
+        const productMap = Object.fromEntries(products.map(p => [p.id, p]));
+        const isa_id = (partner_id || 'BUYER').padEnd(15).substring(0,15);
+        const ourId  = (process.env.EDI_ISA_ID || 'SELLERAGENT').padEnd(15).substring(0,15);
+        const date   = new Date().toISOString().slice(0,10).replace(/-/g,'');
+        const time   = new Date().toTimeString().slice(0,5).replace(':','');
+        const ctrl   = String(Math.floor(Math.random()*999999999)).padStart(9,'0');
+
+        let x12 = `ISA*00*          *00*          *ZZ*${isa_id}*ZZ*${ourId}*${date.slice(2)}*${time}*^*00501*${ctrl}*0*P*:~\n`;
+        x12 += `GS*PO*${partner_id}*${(process.env.EDI_ISA_ID||'SELLERAGENT')}*${date}*${time}*1*X*005010~\n`;
+        x12 += `ST*850*0001~\nBEG*00*SA*${po_number}**${date}~\n`;
+        if (shipping_name || shipping_city) {
+          x12 += `N1*ST*${shipping_name||''}*92*BUYER~\n`;
+          if (shipping_street) x12 += `N3*${shipping_street}~\n`;
+          x12 += `N4*${shipping_city||''}*${shipping_state||''}*${shipping_zip||''}*US~\n`;
+        }
+        items.forEach((item, i) => {
+          const p = productMap[item.product_id];
+          const price = item.unit_price || p?.price || 0;
+          x12 += `PO1*${i+1}*${item.quantity}*EA*${parseFloat(price).toFixed(2)}*PE*VP*${item.product_id}~\n`;
+        });
+        x12 += `CTT*${items.length}~\nSE*${5 + items.length + (shipping_city?3:0)}*0001~\nGE*1*1~\nIEA*1*${ctrl}~\n`;
+        ediPayload = x12;
+      }
+
+      if (!ediPayload) return { content: [{ type: 'text', text: '❌ No EDI payload. Provide raw_x12 or use mode=structured.' }] };
+
+      try {
+        const res = await fetch(`${base}/edi/receive`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/edi-x12', 'X-API-Key': apiKey },
+          body: ediPayload,
+        });
+        const data = await res.json();
+        if (!res.ok) return { content: [{ type: 'text', text: `❌ EDI Error: ${data.error}` }] };
+        return { content: [{ type: 'text', text: `✅ EDI 850 submitted!
+
+Message ID:   ${data.edi_message_id}
+Transaction:  ${data.transaction_type}
+ISA Control:  ${data.isa_control}
+Partner:      ${data.partner_id}
+Status:       ${data.status}
+
+${data.info}
+
+Use check_edi_status("${data.isa_control}") to track responses.` }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: `❌ Failed to send EDI: ${err.message}` }] };
+      }
+    }
+  );
+
+  // ── Tool 15: check_edi_status ────────────────────────────────
+  server.tool(
+    'check_edi_status',
+    'Check the status of a sent EDI 850 — was 997 sent? Was the order accepted (855)? Has it shipped (856)?',
+    { isa_control_number: z.string().describe('ISA control number from the send_edi_850 response') },
+    async ({ isa_control_number }) => {
+      const { rows } = await pool.query(`
+        SELECT m.*, o.status AS order_status, o.id AS order_id, o.total_amount,
+          (SELECT json_agg(json_build_object('type',r.transaction_set,'status',r.status,'at',r.processed_at))
+           FROM edi_messages r
+           WHERE r.direction='outbound' AND (r.partner_id=m.partner_id)
+             AND r.created_at > m.created_at
+          ) AS responses
+        FROM edi_messages m
+        LEFT JOIN orders o ON o.id=m.order_id
+        WHERE m.isa_control_no=$1 AND m.direction='inbound'
+        ORDER BY m.created_at DESC LIMIT 1
+      `, [isa_control_number]);
+
+      if (!rows.length) return { content: [{ type: 'text', text: `No EDI message found with ISA control number: ${isa_control_number}` }] };
+      const m = rows[0];
+      const responses = (m.responses || []).filter(Boolean);
+      const statusIcon = { received:'⏳', processed:'✅', rejected:'❌', error:'🚫', queued:'🔄' };
+
+      let text = `📨 EDI 850 Status — ISA: ${isa_control_number}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Status:      ${statusIcon[m.status]||''} ${m.status}
+PO Number:   ${m.po_number || '—'}
+Partner:     ${m.partner_id}
+Received:    ${new Date(m.created_at).toLocaleString()}
+${m.error_detail ? `\n❌ Error: ${m.error_detail}` : ''}
+`;
+      if (m.order_id) text += `\nOrder #${m.order_id}: ${m.order_status} | $${parseFloat(m.total_amount||0).toFixed(2)}`;
+      if (responses.length) {
+        text += '\n\n📤 EDI Responses Sent:\n';
+        responses.forEach(r => { text += `  • ${r.type} — ${r.status} (${r.at ? new Date(r.at).toLocaleString() : 'pending'})\n`; });
+      } else {
+        text += '\n\n⏳ No outbound responses yet (997 being generated...)';
+      }
+      return { content: [{ type: 'text', text }] };
+    }
+  );
+
   return server;
 }
 

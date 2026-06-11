@@ -19,3 +19,7 @@ services:
         value: "0.70"
       - key: PRICE_HARD_REJECT_PCT
         value: "0.60"
+      - key: EDI_ISA_ID
+        value: SELLERAGENT
+      - key: EDI_AS2_ID
+        value: SELLERAGENT-AS2

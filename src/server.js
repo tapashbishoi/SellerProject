@@ -7,6 +7,8 @@ const { startConsumer }      = require('./mq/consumer');
 const { getMQStatus }        = require('./mq/connection');
 const { attachMcpToExpress } = require('./mcp/buyer-server');
 const seedDCs                = require('./dc/seed');
+const { startEDIProcessor }  = require('./edi/processor');
+const { startEDISender }     = require('./edi/sender');
 
 const requireApiKey = require('./middleware/apiKey');
 const swaggerUi = require('swagger-ui-express');
@@ -64,6 +66,7 @@ app.use('/api/orders',    require('./routes/orders'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/buyers',    require('./routes/buyers'));
 app.use('/api/dc',        require('./routes/dc'));
+app.use('/edi',           require('./routes/edi'));
 
 // Health check — shows DB + MQ status
 app.get('/api/health', async (req, res) => {
@@ -90,5 +93,8 @@ initSchema()
   .then(() => {
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
     startConsumer();
+    // EDI async processors (loosely coupled via RabbitMQ topics)
+    startEDIProcessor().catch(err => console.error('[EDI-Processor] Start error:', err.message));
+    startEDISender().catch(err => console.error('[EDI-Sender] Start error:', err.message));
   })
   .catch(err => { console.error('Failed to init DB:', err); process.exit(1); });

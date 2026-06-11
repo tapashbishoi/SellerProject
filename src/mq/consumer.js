@@ -78,6 +78,18 @@ async function processOrder(orderData) {
     );
     await client.query('COMMIT');
     console.log(`[Consumer] ✅ Order #${orderId} confirmed — total $${totalAmount.toFixed(2)}`);
+
+    // Fire EDI event if this is an EDI-sourced order → triggers 855
+    try {
+      const { rows: orderRow } = await pool.query(`SELECT channel, edi_partner_id FROM orders WHERE id=$1`, [orderId]);
+      if (orderRow[0]?.channel === 'edi' && orderRow[0]?.edi_partner_id) {
+        const { publishEDI } = require('../edi/mq');
+        await publishEDI('edi.order.confirmed', { event: 'order.confirmed', order_id: orderId, status: 'confirmed' });
+      }
+    } catch (ediErr) {
+      console.warn('[Consumer] EDI event publish warning:', ediErr.message);
+    }
+
     return { success: true, orderId };
 
   } catch (err) {
