@@ -54,6 +54,17 @@ async function processOrder(orderData) {
         `INSERT INTO order_items (order_id, product_id, quantity, unit_price) VALUES ($1,$2,$3,$4)`,
         [orderId, item.product_id, item.quantity, unitPrice]
       );
+      // Deduct from DC inventory if order has an assigned DC, else deduct from global
+      const { rows: orderRow } = await client.query(`SELECT assigned_dc_id FROM orders WHERE id=$1`, [orderId]);
+      const dcId = orderRow[0]?.assigned_dc_id;
+      if (dcId) {
+        await client.query(
+          `UPDATE dc_inventory SET quantity = quantity - $1, updated_at = NOW()
+           WHERE dc_id=$2 AND product_id=$3`,
+          [item.quantity, dcId, item.product_id]
+        );
+      }
+      // Always keep global inventory in sync
       await client.query(
         `UPDATE inventory SET quantity = quantity - $1, updated_at = NOW() WHERE product_id = $2`,
         [item.quantity, item.product_id]

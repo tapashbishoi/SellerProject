@@ -3,9 +3,10 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const initSchema = require('./schema');
-const { startConsumer }    = require('./mq/consumer');
-const { getMQStatus }      = require('./mq/connection');
+const { startConsumer }      = require('./mq/consumer');
+const { getMQStatus }        = require('./mq/connection');
 const { attachMcpToExpress } = require('./mcp/buyer-server');
+const seedDCs                = require('./dc/seed');
 
 const requireApiKey = require('./middleware/apiKey');
 const swaggerUi = require('swagger-ui-express');
@@ -38,7 +39,7 @@ app.get('/.well-known/mcp.json', (req, res) => {
     description:    'Stationery seller — browse catalogue, check inventory, place orders, negotiate prices',
     mcp_endpoint:   `${base}/mcp`,
     docs_url:       `${base}/mcp-docs`,
-    tools_count:    9,
+    tools_count:    12,
     categories:     ['catalogue', 'inventory', 'orders', 'negotiation'],
     auth: {
       type:        'header',
@@ -60,6 +61,7 @@ app.use('/api/products',  require('./routes/products'));
 app.use('/api/inventory', require('./routes/inventory'));
 app.use('/api/orders',    require('./routes/orders'));
 app.use('/api/analytics', require('./routes/analytics'));
+app.use('/api/buyers',    require('./routes/buyers'));
 
 // Health check — shows DB + MQ status
 app.get('/api/health', async (req, res) => {
@@ -82,9 +84,9 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 
 initSchema()
+  .then(() => seedDCs())
   .then(() => {
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-    // Start MQ consumer in the same process (works on Render free tier)
     startConsumer();
   })
   .catch(err => { console.error('Failed to init DB:', err); process.exit(1); });

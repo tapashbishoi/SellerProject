@@ -195,17 +195,19 @@
   <div class="info-box">
     <h2>🛒 Typical Buyer Flow</h2>
     <div class="flow-diagram">
-      1. <b>browse_catalogue</b> — find products, see prices & stock
+      1. <b>register_buyer</b> — save your office address once → nearest DC auto-assigned
       <span class="flow-arrow">→</span>
-      2. <b>check_inventory</b> — confirm quantity available
+      2. <b>browse_catalogue</b> — find products, see prices & stock
       <span class="flow-arrow">→</span>
-      3a. <b>place_order</b> — order at list price
+      3. <b>check_delivery_options</b> — see which DC fulfills, shipping days & cost <i>before</i> ordering
+      <span class="flow-arrow">→</span>
+      4a. <b>place_order</b> — order at list price (address & DC auto-loaded)
       &nbsp;&nbsp;&nbsp;<i>or</i>
-      3b. <b>negotiate_price</b> <span class="flow-arrow">→</span> <b>accept_counter_offer</b> — negotiate a better deal
+      4b. <b>negotiate_price</b> <span class="flow-arrow">→</span> <b>accept_counter_offer</b> — negotiate (shipping zone affects discount)
       <span class="flow-arrow">→</span>
-      4. <b>track_order</b> — follow order status (queued → confirmed → shipped)
+      5. <b>track_order</b> — follow status + see fulfilling DC
       <span class="flow-arrow">→</span>
-      5. <b>list_my_orders</b> — view full order history
+      6. <b>list_my_orders</b> — view full order history
     </div>
   </div>
 
@@ -245,12 +247,15 @@ const TOOL_META = {
   place_order:          { category: 'Orders',       color: '#ff6d00', example: { buyer_name: 'Ravi Kumar', buyer_email: 'ravi@company.com', quantity_note: '', items: [{ product_id: 9, quantity: 10 }] } },
   track_order:          { category: 'Orders',       color: '#ff6d00', example: { order_id: 12 } },
   list_my_orders:       { category: 'Orders',       color: '#ff6d00', example: { buyer_email: 'ravi@company.com' } },
-  negotiate_price:      { category: 'Negotiation',  color: '#9c27b0', example: { product_id: 9, proposed_price: 8.50, quantity: 50, buyer_email: 'ravi@company.com', buyer_name: 'Ravi Kumar' } },
-  get_negotiation:      { category: 'Negotiation',  color: '#9c27b0', example: { negotiation_id: 1, buyer_email: 'ravi@company.com' } },
-  accept_counter_offer: { category: 'Negotiation',  color: '#9c27b0', example: { negotiation_id: 1, buyer_email: 'ravi@company.com' } },
+  register_buyer:          { category: 'Buyer Profile', color: '#00897b', example: { buyer_email: 'ravi@company.com', buyer_name: 'Ravi Kumar', company_name: 'Acme Corp', shipping_street: '123 Main St', shipping_city: 'New York', shipping_state: 'NY', shipping_zip: '10001' } },
+  get_my_profile:          { category: 'Buyer Profile', color: '#00897b', example: { buyer_email: 'ravi@company.com' } },
+  check_delivery_options:  { category: 'DC Routing',    color: '#e65100', example: { buyer_email: 'ravi@company.com', items: [{ product_id: 9, quantity: 20 }] } },
+  negotiate_price:         { category: 'Negotiation',   color: '#9c27b0', example: { product_id: 9, proposed_price: 8.50, quantity: 50, buyer_email: 'ravi@company.com', buyer_name: 'Ravi Kumar' } },
+  get_negotiation:         { category: 'Negotiation',   color: '#9c27b0', example: { negotiation_id: 1, buyer_email: 'ravi@company.com' } },
+  accept_counter_offer:    { category: 'Negotiation',   color: '#9c27b0', example: { negotiation_id: 1, buyer_email: 'ravi@company.com' } },
 };
 
-const CATEGORY_ORDER = ['Catalogue', 'Inventory', 'Orders', 'Negotiation'];
+const CATEGORY_ORDER = ['Buyer Profile', 'Catalogue', 'Inventory', 'DC Routing', 'Orders', 'Negotiation'];
 
 // ── Fetch tools from MCP server ───────────────────────────────
 async function fetchTools() {

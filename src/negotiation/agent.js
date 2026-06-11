@@ -28,7 +28,7 @@ async function getBuyerHistory(buyer_email) {
 }
 
 // ── Gemini negotiation evaluator ─────────────────────────────
-async function evaluateOffer({ product, quantity, buyer_offer, floor_price, buyer_history, round, previous_counter }) {
+async function evaluateOffer({ product, quantity, buyer_offer, floor_price, buyer_history, round, previous_counter, shipping_info }) {
   const model = getGemini().getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-flash-latest' });
 
   const prompt = `You are a professional sales negotiation agent for a stationery business.
@@ -47,6 +47,13 @@ BUYER DETAILS:
 - Total spent with us: $${parseFloat(buyer_history.total_spent).toFixed(2)}
 - Last order: ${buyer_history.last_order ? new Date(buyer_history.last_order).toLocaleDateString() : 'First time buyer'}
 
+SHIPPING & LOGISTICS:
+${shipping_info ? `- Buyer ships to: ${shipping_info.city}, ${shipping_info.state}
+- Fulfilling DC: ${shipping_info.dc_name} (${shipping_info.dc_city})
+- Estimated shipping: $${shipping_info.shipping_cost} for this order
+- Shipping as % of order value at buyer's offer: ${((shipping_info.shipping_cost / (buyer_offer * quantity)) * 100).toFixed(1)}%
+- Delivery: ${shipping_info.shipping_days} business days` : '- Shipping details not available'}
+
 NEGOTIATION:
 - Round: ${round}
 - Buyer's offer: $${buyer_offer} per unit (total: $${(buyer_offer * quantity).toFixed(2)})
@@ -56,10 +63,12 @@ RULES:
 1. NEVER accept below the floor price of $${floor_price.toFixed(2)} per unit
 2. For loyal buyers (3+ orders or $500+ spent), you may offer up to 5% extra discount
 3. For large orders (50+ units), you may go closer to floor price
-4. If the buyer's offer is at or above list price, accept immediately
-5. If the buyer is offering below floor, REJECT with a clear reason and a fair counter-offer
-6. On round 3+, be firmer — state this is your best and final offer
-7. Always be professional and friendly
+4. If buyer is FAR from DC (shipping > 15% of order value), be less flexible on discount — shipping eats margin
+5. If buyer is NEAR DC (shipping < 5% of order value), you can offer slightly more discount
+6. If the buyer's offer is at or above list price, accept immediately
+7. If the buyer is offering below floor, REJECT with a clear reason and a fair counter-offer
+8. On round 3+, be firmer — state this is your best and final offer
+9. Always be professional and friendly
 
 Respond in this EXACT JSON format (no markdown, just JSON):
 {
@@ -149,9 +158,29 @@ async function handleNegotiation({ product_id, buyer_offer, buyer_email, buyer_n
     }
   }
 
+  // Load buyer profile for shipping context
+  const { rows: profileRows } = await pool.query(
+    `SELECT b.shipping_city, b.shipping_state, b.shipping_zip,
+            dc.name AS dc_name, dc.city AS dc_city, dc.dc_code
+     FROM buyer_profiles b
+     LEFT JOIN distribution_centers dc ON dc.id = b.preferred_dc_id
+     WHERE LOWER(b.buyer_email) = LOWER($1)`, [buyer_email]
+  );
+  let shipping_info = null;
+  if (profileRows.length && profileRows[0].shipping_state) {
+    const p = profileRows[0];
+    const dcCode = p.dc_code || require('../dc/zones').getDCCodeForState(p.shipping_state);
+    shipping_info = {
+      city: p.shipping_city, state: p.shipping_state,
+      dc_name: p.dc_name || 'Nearest DC', dc_city: p.dc_city || '',
+      shipping_cost: require('../dc/zones').estimateShippingCost(dcCode, p.shipping_state, quantity),
+      shipping_days: require('../dc/zones').estimateShippingDays(dcCode, p.shipping_state),
+    };
+  }
+
   // Ask Gemini to evaluate
   product.buyer_email = buyer_email;
-  const ai = await evaluateOffer({ product, quantity, buyer_offer, floor_price, buyer_history, round, previous_counter });
+  const ai = await evaluateOffer({ product, quantity, buyer_offer, floor_price, buyer_history, round, previous_counter, shipping_info });
 
   // Determine final status
   let status = ai.decision === 'accept' ? 'accepted' : ai.decision === 'reject' ? 'rejected' : 'countered';
