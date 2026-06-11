@@ -169,6 +169,19 @@ async function initSchema() {
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS edi_po_number     VARCHAR(50);
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS edi_partner_id    VARCHAR(50);
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS edi_message_id    INT REFERENCES edi_messages(id);
+
+      -- EDI partner delivery preferences
+      ALTER TABLE edi_trading_partners ADD COLUMN IF NOT EXISTS send_997          BOOLEAN DEFAULT true;
+      ALTER TABLE edi_trading_partners ADD COLUMN IF NOT EXISTS send_855          BOOLEAN DEFAULT true;
+      ALTER TABLE edi_trading_partners ADD COLUMN IF NOT EXISTS send_856          BOOLEAN DEFAULT true;
+      ALTER TABLE edi_trading_partners ADD COLUMN IF NOT EXISTS send_810          BOOLEAN DEFAULT false;
+      ALTER TABLE edi_trading_partners ADD COLUMN IF NOT EXISTS expects_ack       BOOLEAN DEFAULT false;
+      ALTER TABLE edi_trading_partners ADD COLUMN IF NOT EXISTS ack_timeout_hours INT     DEFAULT 24;
+
+      -- Outbound ack tracking
+      ALTER TABLE edi_messages ADD COLUMN IF NOT EXISTS ack_required     BOOLEAN;
+      ALTER TABLE edi_messages ADD COLUMN IF NOT EXISTS ack_received_at  TIMESTAMPTZ;
+      ALTER TABLE edi_messages ADD COLUMN IF NOT EXISTS ack_isa_control  VARCHAR(20);
     `);
 
     console.log('Database schema initialised');

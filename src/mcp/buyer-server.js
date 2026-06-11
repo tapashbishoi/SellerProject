@@ -572,7 +572,164 @@ ${n.order_id ? `Order placed:  #${n.order_id}` : ''}` }] };
     }
   );
 
-  // ── Tool 13: get_edi_guidelines ──────────────────────────────
+  // ── Tool 13: configure_edi_delivery ──────────────────────────
+  server.tool(
+    'configure_edi_delivery',
+    'Register your EDI callback URL and choose which outbound documents you want to receive (855, 856, 810). Also configure whether you will send 997 acknowledgments back to us for our outbound docs.',
+    {
+      partner_id:        z.string().describe('Your EDI partner ID (from register_edi_partner or your ISA ID)'),
+      callback_url:      z.string().url().describe('Your HTTPS endpoint where we POST 855/856/810 — must be publicly reachable'),
+      wants_997:         z.boolean().default(true).describe('Receive 997 Functional Ack for your inbound 850/860? Default: true'),
+      wants_855:         z.boolean().default(true).describe('Receive 855 Purchase Order Acknowledgment when order is confirmed? Default: true'),
+      wants_856:         z.boolean().default(true).describe('Receive 856 Ship Notice when order ships? Default: true'),
+      wants_810:         z.boolean().default(false).describe('Receive 810 Invoice when order is delivered? Default: false'),
+      will_send_997_back: z.boolean().default(false).describe('Will you send us a 997 to acknowledge our outbound 855/856/810? Set true so we can track delivery confirmation.'),
+      ack_timeout_hours: z.number().int().positive().default(24).describe('Hours before we flag missing ack as overdue. Default: 24'),
+    },
+    async ({ partner_id, callback_url, wants_997, wants_855, wants_856, wants_810, will_send_997_back, ack_timeout_hours }) => {
+      const base   = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+      const apiKey = (process.env.API_KEYS || '').split(',')[0];
+
+      const res = await fetch(`${base}/edi/partners/${partner_id}/preferences`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+        body: JSON.stringify({
+          callback_url,
+          send_997:          wants_997,
+          send_855:          wants_855,
+          send_856:          wants_856,
+          send_810:          wants_810,
+          expects_ack:       will_send_997_back,
+          ack_timeout_hours,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) return { content: [{ type: 'text', text: `❌ Error: ${data.error}` }] };
+
+      const docs = [wants_855?'855 (PO Ack)':'', wants_856?'856 (Ship Notice)':'', wants_810?'810 (Invoice)':'', wants_997?'997 (Functional Ack)':''].filter(Boolean);
+      return { content: [{ type: 'text', text: `✅ EDI delivery preferences saved for partner: ${partner_id}
+
+📤 Documents you will receive:
+${docs.map(d => `  • ${d}`).join('\n') || '  • None configured'}
+
+🔗 Callback URL: ${callback_url}
+   We will POST raw X12 EDI to this endpoint with headers:
+   Content-Type: application/edi-x12
+   AS2-From: ${process.env.EDI_AS2_ID || 'SELLERAGENT-AS2'}
+   AS2-To: <your-as2-id>
+
+${will_send_997_back ? `🤝 You have agreed to send us a 997 for each document we send.
+   Send it to: POST ${base}/edi/receive  OR  use the acknowledge_edi MCP tool.
+   We will flag unacknowledged docs after ${ack_timeout_hours} hours.` : `ℹ️  One-way delivery: you will NOT send 997 back to us.`}
+
+⚡ Delivery trigger times:
+  • 855 PO Ack  → sent when your order is confirmed (~2-10 sec after 850)
+  • 856 ASN     → sent when seller marks order as "shipped"
+  • 810 Invoice → sent when seller marks order as "delivered"` }] };
+    }
+  );
+
+  // ── Tool 14: acknowledge_edi ──────────────────────────────────
+  server.tool(
+    'acknowledge_edi',
+    'Send a 997 Functional Acknowledgment for an EDI document we sent you (855, 856, or 810). Use this to confirm you received our outbound EDI. Provide the ISA control number from the document we sent.',
+    {
+      isa_control_number: z.string().describe('ISA control number from the document we sent (e.g. from the 855 or 856 you received)'),
+      partner_id:         z.string().describe('Your EDI partner ID'),
+      accepted:           z.boolean().default(true).describe('true = document accepted (AK5=A), false = rejected (AK5=R)'),
+      rejection_reason:   z.string().optional().describe('If accepted=false, brief reason for rejection'),
+    },
+    async ({ isa_control_number, partner_id, accepted, rejection_reason }) => {
+      // Look up the outbound message we sent
+      const { rows } = await pool.query(
+        `SELECT * FROM edi_messages
+         WHERE isa_control_no=$1 AND direction='outbound' AND partner_id=$2
+         ORDER BY created_at DESC LIMIT 1`,
+        [isa_control_number, partner_id]
+      );
+
+      if (!rows.length) {
+        // Try matching by gs_control (some systems use GS number)
+        const { rows: r2 } = await pool.query(
+          `SELECT * FROM edi_messages WHERE gs_control_no=$1 AND direction='outbound' AND partner_id=$2 LIMIT 1`,
+          [isa_control_number, partner_id]
+        );
+        if (!r2.length) return { content: [{ type: 'text', text: `❌ No outbound EDI message found with ISA control ${isa_control_number} for partner ${partner_id}.\n\nCheck check_edi_delivery_status to see messages awaiting acknowledgment.` }] };
+      }
+
+      const msg = rows[0];
+
+      // Mark as acknowledged in DB
+      await pool.query(
+        `UPDATE edi_messages SET ack_received_at=NOW(), ack_isa_control=$1 WHERE id=$2`,
+        [isa_control_number, msg.id]
+      );
+
+      if (!accepted) {
+        await pool.query(
+          `UPDATE edi_messages SET status='ack_rejected', error_detail=$1 WHERE id=$2`,
+          [`Buyer rejected via 997: ${rejection_reason || 'No reason given'}`, msg.id]
+        );
+        console.log(`[MCP] Partner ${partner_id} REJECTED our ${msg.transaction_set} — ${rejection_reason}`);
+        return { content: [{ type: 'text', text: `❌ Rejection recorded for our ${msg.transaction_set} (ISA: ${isa_control_number}).\n\nReason: ${rejection_reason || 'Not specified'}\n\nWe have been notified. Please contact us to resolve.` }] };
+      }
+
+      console.log(`[MCP] Partner ${partner_id} acknowledged our ${msg.transaction_set} — ISA:${isa_control_number}`);
+      return { content: [{ type: 'text', text: `✅ Acknowledgment recorded!
+
+Document:    ${msg.transaction_set} (${{'855':'Purchase Order Ack','856':'Ship Notice','810':'Invoice','997':'Functional Ack'}[msg.transaction_set] || msg.transaction_set})
+ISA Control: ${isa_control_number}
+Partner:     ${partner_id}
+Status:      Acknowledged ✓
+
+Thank you for confirming receipt.` }] };
+    }
+  );
+
+  // ── Tool 15: get_edi_delivery_status ─────────────────────────
+  server.tool(
+    'get_edi_delivery_status',
+    'Check the delivery status of EDI documents we have sent you (855, 856, 810). Shows what was sent, when, and whether we received your acknowledgment.',
+    {
+      partner_id:  z.string().describe('Your EDI partner ID'),
+      order_id:    z.number().int().positive().optional().describe('Filter by specific order ID'),
+      unacked_only: z.boolean().default(false).describe('Show only documents awaiting your 997 acknowledgment'),
+    },
+    async ({ partner_id, order_id, unacked_only }) => {
+      let query = `
+        SELECT m.id, m.transaction_set, m.status, m.ack_required,
+               m.ack_received_at, m.ack_isa_control, m.isa_control_no,
+               m.order_id, m.created_at, m.processed_at, m.error_detail
+        FROM edi_messages m
+        WHERE m.direction='outbound' AND m.partner_id=$1
+      `;
+      const params = [partner_id];
+      if (order_id)     { params.push(order_id); query += ` AND m.order_id=$${params.length}`; }
+      if (unacked_only) query += ` AND m.ack_required=true AND m.ack_received_at IS NULL`;
+      query += ` ORDER BY m.created_at DESC LIMIT 50`;
+
+      const { rows } = await pool.query(query, params);
+      if (!rows.length) return { content: [{ type: 'text', text: `No outbound EDI documents found for partner: ${partner_id}${order_id ? ` / order #${order_id}` : ''}.` }] };
+
+      const typeLabel = { '997':'Functional Ack','855':'PO Acknowledgment','856':'Ship Notice/ASN','810':'Invoice' };
+      const lines = rows.map(m => {
+        const ackStatus = !m.ack_required ? '—' : m.ack_received_at ? `✅ Acked ${new Date(m.ack_received_at).toLocaleDateString()}` : '⏳ Awaiting your 997';
+        return `• ${m.transaction_set} (${typeLabel[m.transaction_set]||''}) ${m.status === 'sent' ? '✅ Delivered' : m.status === 'failed' ? '❌ Failed' : '⏳ '+m.status}
+  ISA: ${m.isa_control_no || '—'} | Order: ${m.order_id ? '#'+m.order_id : '—'} | Sent: ${new Date(m.created_at).toLocaleString()}
+  Ack: ${ackStatus}${m.error_detail ? `\n  ⚠ ${m.error_detail}` : ''}`;
+      });
+
+      const pendingAcks = rows.filter(m => m.ack_required && !m.ack_received_at).length;
+      return { content: [{ type: 'text', text: `📤 Outbound EDI for ${partner_id}${order_id ? ` / Order #${order_id}` : ''}
+${rows.length} document(s)${pendingAcks > 0 ? ` · ⏳ ${pendingAcks} awaiting your acknowledgment` : ' · ✅ All acknowledged'}
+
+${lines.join('\n\n')}
+
+${pendingAcks > 0 ? `To acknowledge: call acknowledge_edi(isa_control_number, partner_id) for each pending document.` : ''}` }] };
+    }
+  );
+
+  // ── Tool 16: get_edi_guidelines ──────────────────────────────
   server.tool(
     'get_edi_guidelines',
     'Get the complete EDI setup guide — our ISA/GS IDs, required 850 segments, what we send back (997/855/856/810), and example X12 payload.',
@@ -635,7 +792,7 @@ IEA*1*000000001~
     }
   );
 
-  // ── Tool 14: send_edi_850 ────────────────────────────────────
+  // ── Tool 17: send_edi_850 ────────────────────────────────────
   server.tool(
     'send_edi_850',
     'Send an EDI 850 Purchase Order. Accepts either raw X12 string OR structured JSON (we convert to X12). Returns the EDI message ID — use check_edi_status to track 997/855/856 responses.',
@@ -721,7 +878,7 @@ Use check_edi_status("${data.isa_control}") to track responses.` }] };
     }
   );
 
-  // ── Tool 15: check_edi_status ────────────────────────────────
+  // ── Tool 18: check_edi_status ────────────────────────────────
   server.tool(
     'check_edi_status',
     'Check the status of a sent EDI 850 — was 997 sent? Was the order accepted (855)? Has it shipped (856)?',

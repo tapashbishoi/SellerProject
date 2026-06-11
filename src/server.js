@@ -42,7 +42,7 @@ app.get('/.well-known/mcp.json', (req, res) => {
     description:    'Stationery seller — browse catalogue, check inventory, place orders, negotiate prices',
     mcp_endpoint:   `${base}/mcp`,
     docs_url:       `${base}/mcp-docs`,
-    tools_count:    12,
+    tools_count:    18,
     categories:     ['catalogue', 'inventory', 'orders', 'negotiation'],
     auth: {
       type:        'header',

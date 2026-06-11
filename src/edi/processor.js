@@ -81,8 +81,12 @@ async function process850(payload) {
     return;
   }
 
-  // Send 997 Accepted
-  await send997(partner, isa_control, gs_control, order850.st_control, true);
+  // Send 997 Accepted (unless partner opted out)
+  if (partner.send_997 !== false) {
+    await send997(partner, isa_control, gs_control, order850.st_control, true);
+  } else {
+    console.log(`[EDI-Processor] Partner ${partner.partner_id} has opted out of 997 — skipping`);
+  }
 
   // Stage order via existing MQ pipeline
   const { rows } = await pool.query(

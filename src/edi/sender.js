@@ -12,10 +12,11 @@ const { OUR_ISA_ID } = require('./receiver');
 
 // ── Deliver outbound EDI to partner ───────────────────────────
 async function deliverEDI(partner, rawEdi, ediType) {
+  const ackRequired = partner.expects_ack && ['855','856','810'].includes(ediType);
   const { rows: msgRows } = await pool.query(
-    `INSERT INTO edi_messages (direction, transaction_set, partner_id, raw_edi, status)
-     VALUES ('outbound',$1,$2,$3,'queued') RETURNING id`,
-    [ediType, partner.partner_id, rawEdi]
+    `INSERT INTO edi_messages (direction, transaction_set, partner_id, raw_edi, status, ack_required)
+     VALUES ('outbound',$1,$2,$3,'queued',$4) RETURNING id`,
+    [ediType, partner.partner_id, rawEdi, ackRequired]
   );
   const msgId = msgRows[0].id;
 
@@ -113,7 +114,7 @@ async function handleOrderEvent(payload) {
     zip:     order.dc_zip,
   };
 
-  if (event === 'order.confirmed') {
+  if (event === 'order.confirmed' && partner.send_855 !== false) {
     // Generate 855
     const edi855 = generate855({
       sender_id:   OUR_ISA_ID,
@@ -131,7 +132,7 @@ async function handleOrderEvent(payload) {
     console.log(`[EDI-Sender] 855 sent for Order #${order_id}`);
   }
 
-  if (event === 'order.shipped') {
+  if (event === 'order.shipped' && partner.send_856 !== false) {
     // Generate 856
     const edi856 = generate856({
       sender_id:     OUR_ISA_ID,
@@ -147,7 +148,7 @@ async function handleOrderEvent(payload) {
     console.log(`[EDI-Sender] 856 sent for Order #${order_id}`);
   }
 
-  if (event === 'order.delivered') {
+  if (event === 'order.delivered' && partner.send_810 === true) {
     // Generate 810 invoice
     const invoiceNumber = `INV-${order.id}-${Date.now().toString().slice(-6)}`;
     const edi810 = generate810({

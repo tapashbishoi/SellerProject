@@ -139,19 +139,67 @@ router.get('/partners', async (req, res) => {
 });
 
 router.post('/partners', async (req, res) => {
-  const { partner_id, company_name, buyer_email, isa_qualifier = 'ZZ', isa_id, gs_id, as2_id, callback_url, edi_version = '00501', notes } = req.body;
+  const {
+    partner_id, company_name, buyer_email, isa_qualifier = 'ZZ', isa_id, gs_id,
+    as2_id, callback_url, edi_version = '00501', notes,
+    send_997 = true, send_855 = true, send_856 = true, send_810 = false,
+    expects_ack = false, ack_timeout_hours = 24,
+  } = req.body;
   if (!partner_id || !company_name || !isa_id || !gs_id)
     return res.status(400).json({ error: 'partner_id, company_name, isa_id and gs_id are required' });
 
   const { rows } = await pool.query(`
-    INSERT INTO edi_trading_partners (partner_id, company_name, buyer_email, isa_qualifier, isa_id, gs_id, as2_id, callback_url, edi_version, notes)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    INSERT INTO edi_trading_partners
+      (partner_id, company_name, buyer_email, isa_qualifier, isa_id, gs_id, as2_id,
+       callback_url, edi_version, notes, send_997, send_855, send_856, send_810, expects_ack, ack_timeout_hours)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
     ON CONFLICT (partner_id) DO UPDATE SET
       company_name=$2, buyer_email=$3, isa_qualifier=$4, isa_id=$5, gs_id=$6,
-      as2_id=$7, callback_url=$8, edi_version=$9, notes=$10, updated_at=NOW()
+      as2_id=$7, callback_url=$8, edi_version=$9, notes=$10,
+      send_997=$11, send_855=$12, send_856=$13, send_810=$14,
+      expects_ack=$15, ack_timeout_hours=$16, updated_at=NOW()
     RETURNING *
-  `, [partner_id, company_name, buyer_email, isa_qualifier, isa_id, gs_id, as2_id, callback_url, edi_version, notes]);
+  `, [partner_id, company_name, buyer_email, isa_qualifier, isa_id, gs_id, as2_id,
+      callback_url, edi_version, notes, send_997, send_855, send_856, send_810, expects_ack, ack_timeout_hours]);
   res.status(201).json(rows[0]);
+});
+
+// PATCH /edi/partners/:id/preferences — update delivery preferences only
+router.patch('/partners/:id/preferences', async (req, res) => {
+  const { callback_url, send_997, send_855, send_856, send_810, expects_ack, ack_timeout_hours } = req.body;
+  const { rows } = await pool.query(`
+    UPDATE edi_trading_partners SET
+      callback_url      = COALESCE($1, callback_url),
+      send_997          = COALESCE($2, send_997),
+      send_855          = COALESCE($3, send_855),
+      send_856          = COALESCE($4, send_856),
+      send_810          = COALESCE($5, send_810),
+      expects_ack       = COALESCE($6, expects_ack),
+      ack_timeout_hours = COALESCE($7, ack_timeout_hours),
+      updated_at        = NOW()
+    WHERE partner_id = $8
+    RETURNING *
+  `, [callback_url, send_997, send_855, send_856, send_810, expects_ack, ack_timeout_hours, req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Partner not found' });
+  res.json(rows[0]);
+});
+
+// GET /edi/ack-pending — outbound messages awaiting buyer 997
+router.get('/ack-pending', async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT m.*, p.company_name, p.ack_timeout_hours,
+      EXTRACT(EPOCH FROM (NOW() - m.created_at))/3600 AS hours_since_sent,
+      CASE WHEN EXTRACT(EPOCH FROM (NOW() - m.created_at))/3600 > p.ack_timeout_hours
+           THEN true ELSE false END AS overdue
+    FROM edi_messages m
+    JOIN edi_trading_partners p ON p.partner_id = m.partner_id
+    WHERE m.direction = 'outbound'
+      AND m.ack_required = true
+      AND m.ack_received_at IS NULL
+      AND m.status NOT IN ('failed')
+    ORDER BY m.created_at ASC
+  `);
+  res.json(rows);
 });
 
 // ── GET /edi/info — buyer guide for EDI setup ─────────────────

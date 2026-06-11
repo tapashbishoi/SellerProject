@@ -227,6 +227,7 @@ function parse860(envelope) {
 function detectTransactionType(rawEdi) {
   if (rawEdi.includes('*850*')) return '850';
   if (rawEdi.includes('*860*')) return '860';
+  if (rawEdi.includes('*997*')) return '997';
   return 'unknown';
 }
 

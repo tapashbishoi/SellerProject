@@ -22,8 +22,8 @@ const OUR_AS2_ID   = process.env.EDI_AS2_ID   || 'SELLERAGENT-AS2';
 async function receiveEDI(rawEdi, source = 'https', partnerId = null) {
   // 1. Detect transaction type
   const txType = detectTransactionType(rawEdi);
-  if (!['850','860'].includes(txType))
-    throw new Error(`Unsupported EDI transaction type: ${txType || 'unknown'}. Supported: 850, 860`);
+  if (!['850','860','997'].includes(txType))
+    throw new Error(`Unsupported EDI transaction type: ${txType || 'unknown'}. Supported: 850, 860, 997`);
 
   // 2. Parse envelope (ISA/GS only — don't parse full detail yet, that's the processor's job)
   let envelope, isaControl, senderId, poNumber;
@@ -62,7 +62,24 @@ async function receiveEDI(rawEdi, source = 'https', partnerId = null) {
   );
   const messageId = msgRows[0].id;
 
-  // 6. Publish to RabbitMQ topic based on transaction type
+  // 6a. If inbound 997 — buyer is acking our outbound. Match and mark.
+  if (txType === '997') {
+    // AK1 segment has the original GS control number we sent
+    const originalGsCtrl = rawEdi.match(/AK1\*[A-Z]{2}\*(\d+)/)?.[1];
+    if (originalGsCtrl) {
+      await pool.query(
+        `UPDATE edi_messages
+         SET ack_received_at=NOW(), ack_isa_control=$1
+         WHERE direction='outbound' AND gs_control_no=$2 AND partner_id=$3`,
+        [isaControl, originalGsCtrl, partner?.partner_id || senderId]
+      );
+      await pool.query(`UPDATE edi_messages SET status='acknowledged', processed_at=NOW() WHERE id=$1`, [messageId]);
+      console.log(`[EDI-Receiver] Inbound 997 from ${senderId} — acknowledged our outbound GS:${originalGsCtrl}`);
+    }
+    return { edi_message_id: messageId, transaction_type: '997', isa_control: isaControl, partner_id: partner?.partner_id || senderId, status: 'acknowledged' };
+  }
+
+  // 6b. Publish to RabbitMQ topic based on transaction type
   await publishEDI(`edi.inbound.${txType}`, {
     edi_message_id: messageId,
     transaction_type: txType,
