@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EDI Operations Center</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; }
+
+    header {
+      background: linear-gradient(135deg, #1a1f2e, #252d3d);
+      border-bottom: 1px solid #2d3748;
+      padding: 16px 28px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    header h1 { font-size: 1.25rem; color: #e2e8f0; font-weight: 700; }
+    header .sub { font-size: 0.82rem; color: #718096; margin-top: 2px; }
+    header .live { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #68d391; }
+    header .live .dot { width: 8px; height: 8px; border-radius: 50%; background: #68d391; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    header .back { color: #718096; text-decoration: none; font-size: 0.82rem; padding: 6px 12px; border: 1px solid #2d3748; border-radius: 6px; }
+    header .back:hover { color: #e2e8f0; border-color: #4a5568; }
+
+    nav {
+      background: #161b27; border-bottom: 1px solid #2d3748;
+      display: flex; padding: 0 28px; gap: 0;
+    }
+    nav button {
+      background: none; border: none; color: #718096; padding: 14px 20px;
+      font-size: 0.88rem; cursor: pointer; border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    nav button:hover { color: #e2e8f0; }
+    nav button.active { color: #63b3ed; border-bottom-color: #63b3ed; font-weight: 600; }
+
+    .tab { display: none; padding: 24px 28px; }
+    .tab.active { display: block; }
+
+    .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 16px; margin-bottom: 24px; }
+    .stat {
+      background: #1a1f2e; border: 1px solid #2d3748; border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .stat .num { font-size: 1.8rem; font-weight: 700; margin-bottom: 4px; }
+    .stat .lbl { font-size: 0.78rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat .sub-num { font-size: 0.82rem; color: #68d391; margin-top: 4px; }
+
+    .card {
+      background: #1a1f2e; border: 1px solid #2d3748; border-radius: 10px;
+      padding: 20px; margin-bottom: 20px;
+    }
+    .card-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 16px;
+    }
+    .card-header h2 { font-size: 0.95rem; font-weight: 600; color: #a0aec0; text-transform: uppercase; letter-spacing: 0.06em; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th { padding: 10px 12px; text-align: left; color: #718096; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid #2d3748; }
+    td { padding: 10px 12px; border-bottom: 1px solid #1e2433; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #1e2433; }
+
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 12px;
+      font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .b-received   { background: #2d3748; color: #a0aec0; }
+    .b-processed  { background: #1a2e1a; color: #68d391; border: 1px solid #2d5a2d; }
+    .b-sent       { background: #1a2a3a; color: #63b3ed; border: 1px solid #2b4c6b; }
+    .b-queued     { background: #2d2a1a; color: #f6e05e; border: 1px solid #5a4e1a; }
+    .b-failed     { background: #2d1a1a; color: #fc8181; border: 1px solid #5a2a2a; }
+    .b-rejected   { background: #2d1a1a; color: #fc8181; border: 1px solid #5a2a2a; }
+    .b-error      { background: #3d1a1a; color: #feb2b2; }
+    .b-inbound    { background: #1a2a1a; color: #68d391; }
+    .b-outbound   { background: #1a1a2d; color: #9f7aea; }
+    .b-850  { background: #1a2e3a; color: #63b3ed; }
+    .b-860  { background: #2d1a2d; color: #d6bcfa; }
+    .b-997  { background: #1a2e1a; color: #68d391; }
+    .b-855  { background: #2d2a1a; color: #f6e05e; }
+    .b-856  { background: #1a2a3a; color: #76e4f7; }
+    .b-810  { background: #1a2d2a; color: #81e6d9; }
+
+    .tx-badge { font-family: monospace; font-size: 0.78rem; }
+
+    .flow-row { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; flex-wrap: wrap; }
+    .flow-step {
+      padding: 4px 10px; border-radius: 6px; font-weight: 600;
+      font-size: 0.75rem;
+    }
+    .flow-arrow { color: #4a5568; font-size: 1rem; }
+    .step-done    { background: #1a2e1a; color: #68d391; border: 1px solid #2d5a2d; }
+    .step-pending { background: #2d3748; color: #718096; }
+    .step-failed  { background: #2d1a1a; color: #fc8181; }
+    .step-waiting { background: #2d2a1a; color: #f6e05e; }
+
+    .filter-bar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+    .filter-bar select, .filter-bar input {
+      background: #0f1117; border: 1px solid #2d3748; color: #e2e8f0;
+      border-radius: 6px; padding: 7px 12px; font-size: 0.85rem;
+    }
+    .filter-bar select:focus, .filter-bar input:focus { outline: none; border-color: #63b3ed; }
+
+    .btn {
+      padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer;
+      font-size: 0.82rem; font-weight: 600; transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.8; }
+    .btn-blue   { background: #2b6cb0; color: #fff; }
+    .btn-green  { background: #276749; color: #fff; }
+    .btn-ghost  { background: #2d3748; color: #a0aec0; }
+
+    .raw-edi {
+      background: #0a0d14; border: 1px solid #2d3748; border-radius: 6px;
+      padding: 14px; font-family: monospace; font-size: 0.78rem; color: #a0aec0;
+      white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto;
+    }
+
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      z-index: 1000; align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: #1a1f2e; border: 1px solid #2d3748; border-radius: 12px;
+      padding: 24px; width: 700px; max-width: 95vw;
+      max-height: 85vh; overflow-y: auto;
+    }
+    .modal h3 { color: #63b3ed; margin-bottom: 16px; font-size: 1rem; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+    .detail-row { display: flex; gap: 8px; margin-bottom: 8px; font-size: 0.85rem; }
+    .detail-lbl { color: #718096; width: 140px; flex-shrink: 0; }
+    .detail-val { color: #e2e8f0; }
+
+    .partner-card {
+      background: #161b27; border: 1px solid #2d3748; border-radius: 8px;
+      padding: 16px; margin-bottom: 12px;
+    }
+    .partner-name { font-weight: 700; color: #63b3ed; margin-bottom: 8px; }
+
+    #toast {
+      position: fixed; bottom: 20px; right: 20px; padding: 10px 18px;
+      border-radius: 8px; font-size: 0.85rem; display: none; z-index: 9999;
+      background: #276749; color: #fff;
+    }
+
+    .empty { text-align: center; padding: 40px; color: #4a5568; font-size: 0.88rem; }
+
+    @media (max-width: 640px) {
+      nav button { padding: 12px 12px; font-size: 0.8rem; }
+      .tab { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div style="font-size:1.5rem;">📡</div>
+  <div>
+    <h1>EDI Operations Center</h1>
+    <div class="sub">X12 EDI — 850 · 860 · 997 · 855 · 856 · 810</div>
+  </div>
+  <div class="live"><div class="dot"></div> Live</div>
+  <a href="/" class="back">← Seller Dashboard</a>
+</header>
+
+<nav>
+  <button class="active" onclick="switchTab('overview',this)">Overview</button>
+  <button onclick="switchTab('transactions',this)">Transactions</button>
+  <button onclick="switchTab('inbound',this)">Inbound 850/860</button>
+  <button onclick="switchTab('outbound',this)">Outbound 997/855/856/810</button>
+  <button onclick="switchTab('partners',this)">Trading Partners</button>
+  <button onclick="switchTab('guide',this)">Setup Guide</button>
+</nav>
+
+<!-- OVERVIEW -->
+<div id="tab-overview" class="tab active">
+  <div class="grid-4" id="ov-stats"></div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+    <div class="card">
+      <div class="card-header">
+        <h2>Recent Inbound</h2>
+        <button class="btn btn-ghost" onclick="loadOverview()">↻</button>
+      </div>
+      <table>
+        <thead><tr><th>Type</th><th>Partner</th><th>PO #</th><th>Status</th><th>Order</th><th>Time</th></tr></thead>
+        <tbody id="ov-inbound"></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-header"><h2>Recent Outbound</h2></div>
+      <table>
+        <thead><tr><th>Type</th><th>Partner</th><th>Status</th><th>Time</th></tr></thead>
+        <tbody id="ov-outbound"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2>Order Lifecycle (EDI-Sourced)</h2></div>
+    <table>
+      <thead><tr><th>Order #</th><th>PO #</th><th>Partner</th><th>850 Recv</th><th>997 Sent</th><th>855 Sent</th><th>856 Sent</th><th>810 Sent</th><th>Order Status</th></tr></thead>
+      <tbody id="ov-lifecycle"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ALL TRANSACTIONS -->
+<div id="tab-transactions" class="tab">
+  <div class="filter-bar">
+    <select id="tx-direction" onchange="loadTransactions()">
+      <option value="">All Directions</option>
+      <option value="inbound">Inbound</option>
+      <option value="outbound">Outbound</option>
+    </select>
+    <select id="tx-type" onchange="loadTransactions()">
+      <option value="">All Types</option>
+      <option value="850">850</option><option value="860">860</option>
+      <option value="997">997</option><option value="855">855</option>
+      <option value="856">856</option><option value="810">810</option>
+    </select>
+    <select id="tx-status" onchange="loadTransactions()">
+      <option value="">All Statuses</option>
+      <option value="received">Received</option><option value="processed">Processed</option>
+      <option value="sent">Sent</option><option value="queued">Queued</option>
+      <option value="failed">Failed</option><option value="rejected">Rejected</option>
+      <option value="error">Error</option>
+    </select>
+    <input id="tx-partner" placeholder="Filter by partner…" oninput="loadTransactions()" style="flex:1" />
+    <button class="btn btn-ghost" onclick="loadTransactions()">↻ Refresh</button>
+  </div>
+  <div class="card" style="padding:0;">
+    <table>
+      <thead><tr><th>#</th><th>Dir</th><th>Type</th><th>Partner</th><th>ISA Control</th><th>PO #</th><th>Status</th><th>Order #</th><th>Error</th><th>Created</th><th></th></tr></thead>
+      <tbody id="tx-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- INBOUND 850/860 -->
+<div id="tab-inbound" class="tab">
+  <div class="filter-bar">
+    <select id="in-type" onchange="loadInbound()">
+      <option value="">850 + 860</option>
+      <option value="850">850 Only</option>
+      <option value="860">860 Only</option>
+    </select>
+    <select id="in-status" onchange="loadInbound()">
+      <option value="">All Statuses</option>
+      <option value="received">Received</option><option value="processed">Processed</option>
+      <option value="rejected">Rejected</option><option value="error">Error</option>
+    </select>
+    <button class="btn btn-ghost" onclick="loadInbound()">↻ Refresh</button>
+  </div>
+  <div class="card" style="padding:0;">
+    <table>
+      <thead><tr><th>#</th><th>Type</th><th>Partner</th><th>PO Number</th><th>ISA Control</th><th>Status</th><th>Order Created</th><th>Error</th><th>Received At</th><th></th></tr></thead>
+      <tbody id="in-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- OUTBOUND 997/855/856/810 -->
+<div id="tab-outbound" class="tab">
+  <div class="filter-bar">
+    <select id="out-type" onchange="loadOutbound()">
+      <option value="">All Outbound</option>
+      <option value="997">997 Ack</option><option value="855">855 PO Ack</option>
+      <option value="856">856 Ship Notice</option><option value="810">810 Invoice</option>
+    </select>
+    <select id="out-status" onchange="loadOutbound()">
+      <option value="">All Statuses</option>
+      <option value="sent">Sent</option><option value="queued">Queued</option>
+      <option value="failed">Failed</option>
+    </select>
+    <button class="btn btn-ghost" onclick="loadOutbound()">↻ Refresh</button>
+  </div>
+  <div class="card" style="padding:0;">
+    <table>
+      <thead><tr><th>#</th><th>Type</th><th>Partner</th><th>Order #</th><th>Status</th><th>Delivery</th><th>Sent At</th><th></th></tr></thead>
+      <tbody id="out-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- TRADING PARTNERS -->
+<div id="tab-partners" class="tab">
+  <div style="display:flex;justify-content:space-between;margin-bottom:16px;">
+    <h2 style="color:#a0aec0;font-size:0.95rem;text-transform:uppercase;letter-spacing:0.06em;">Trading Partners</h2>
+    <button class="btn btn-blue" onclick="openAddPartner()">+ Register Partner</button>
+  </div>
+  <div id="partners-list"></div>
+</div>
+
+<!-- SETUP GUIDE -->
+<div id="tab-guide" class="tab">
+  <div class="card" id="guide-content">
+    <div class="empty">Loading EDI setup guide...</div>
+  </div>
+</div>
+
+<!-- DETAIL MODAL -->
+<div class="modal-overlay" id="modal-detail">
+  <div class="modal">
+    <h3 id="modal-title">EDI Message Detail</h3>
+    <div id="modal-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD PARTNER MODAL -->
+<div class="modal-overlay" id="modal-partner">
+  <div class="modal">
+    <h3>Register Trading Partner</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+      <div><label style="font-size:0.78rem;color:#718096;display:block;margin-bottom:4px;">Partner ID *</label><input id="p-id" style="width:100%;background:#0f1117;border:1px solid #2d3748;color:#e2e8f0;border-radius:6px;padding:8px;" placeholder="ACME_CORP" /></div>
+      <div><label style="font-size:0.78rem;color:#718096;display:block;margin-bottom:4px;">Company Name *</label><input id="p-name" style="width:100%;background:#0f1117;border:1px solid #2d3748;color:#e2e8f0;border-radius:6px;padding:8px;" /></div>
+      <div><label style="font-size:0.78rem;color:#718096;display:block;margin-bottom:4px;">ISA ID *</label><input id="p-isa" style="width:100%;background:#0f1117;border:1px solid #2d3748;color:#e2e8f0;border-radius:6px;padding:8px;" /></div>
+      <div><label style="font-size:0.78rem;color:#718096;display:block;margin-bottom:4px;">GS ID *</label><input id="p-gs" style="width:100%;background:#0f1117;border:1px solid #2d3748;color:#e2e8f0;border-radius:6px;padding:8px;" /></div>
+      <div><label style="font-size:0.78rem;color:#718096;display:block;margin-bottom:4px;">AS2 ID</label><input id="p-as2" style="width:100%;background:#0f1117;border:1px solid #2d3748;color:#e2e8f0;border-radius:6px;padding:8px;" /></div>
+      <div><label style="font-size:0.78rem;color:#718096;display:block;margin-bottom:4px;">Buyer Email</label><input id="p-email" style="width:100%;background:#0f1117;border:1px solid #2d3748;color:#e2e8f0;border-radius:6px;padding:8px;" /></div>
+      <div style="grid-column:1/-1"><label style="font-size:0.78rem;color:#718096;display:block;margin-bottom:4px;">Callback URL (for 997/855/856 delivery)</label><input id="p-url" style="width:100%;background:#0f1117;border:1px solid #2d3748;color:#e2e8f0;border-radius:6px;padding:8px;" placeholder="https://partner-edi-endpoint.com/receive" /></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-partner')">Cancel</button>
+      <button class="btn btn-blue" onclick="savePartner()">Register</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const BASE = window.location.origin;
+const API_KEY = 'seller-admin-key-2025';
+const H = { 'Content-Type': 'application/json', 'X-API-Key': API_KEY };
+
+// ── Helpers ───────────────────────────────────────────────────
+const api = (url, opts = {}) => fetch(`${BASE}${url}`, { ...opts, headers: { ...H, ...opts.headers } }).then(r => r.json());
+const fmtDate = d => d ? new Date(d).toLocaleString('en-US', { month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—';
+const txBadge = t => `<span class="badge tx-badge b-${t?.toLowerCase()}">${t || '—'}</span>`;
+const stBadge = s => `<span class="badge b-${s?.toLowerCase()}">${s || '—'}</span>`;
+const dirBadge = d => `<span class="badge b-${d}">${d}</span>`;
+function toast(msg, ok=true) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.style.background = ok ? '#276749' : '#9b2c2c';
+  el.style.display = 'block'; setTimeout(() => el.style.display='none', 3000);
+}
+
+// ── Tab switching ─────────────────────────────────────────────
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  if (btn) btn.classList.add('active');
+  if (name === 'overview')     loadOverview();
+  if (name === 'transactions') loadTransactions();
+  if (name === 'inbound')      loadInbound();
+  if (name === 'outbound')     loadOutbound();
+  if (name === 'partners')     loadPartners();
+  if (name === 'guide')        loadGuide();
+}
+
+// ── Modal ──────────────────────────────────────────────────────
+function closeModal(id = 'modal-detail') { document.getElementById(id).classList.remove('open'); }
+function openDetailModal(title, body) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = body;
+  document.getElementById('modal-detail').classList.add('open');
+}
+
+// ── OVERVIEW ─────────────────────────────────────────────────
+async function loadOverview() {
+  const [msgs, orders] = await Promise.all([
+    api('/edi/messages?limit=100'),
+    api('/api/orders?status='),
+  ]);
+
+  const inbound  = msgs.filter(m => m.direction === 'inbound');
+  const outbound = msgs.filter(m => m.direction === 'outbound');
+  const total850 = inbound.filter(m => m.transaction_set === '850').length;
+  const total860 = inbound.filter(m => m.transaction_set === '860').length;
+  const processed = inbound.filter(m => m.status === 'processed').length;
+  const rejected  = inbound.filter(m => m.status === 'rejected' || m.status === 'error').length;
+  const sent997   = outbound.filter(m => m.transaction_set === '997').length;
+  const sent855   = outbound.filter(m => m.transaction_set === '855').length;
+  const sent856   = outbound.filter(m => m.transaction_set === '856').length;
+  const failedOut = outbound.filter(m => m.status === 'failed').length;
+  const successRate = inbound.length ? ((processed / inbound.length) * 100).toFixed(0) : 0;
+
+  document.getElementById('ov-stats').innerHTML = `
+    <div class="stat"><div class="num" style="color:#63b3ed">${inbound.length}</div><div class="lbl">Total Inbound</div><div class="sub-num">${total850} × 850 &nbsp; ${total860} × 860</div></div>
+    <div class="stat"><div class="num" style="color:#68d391">${processed}</div><div class="lbl">Processed OK</div><div class="sub-num">${successRate}% success rate</div></div>
+    <div class="stat"><div class="num" style="color:#fc8181">${rejected}</div><div class="lbl">Rejected / Error</div></div>
+    <div class="stat"><div class="num" style="color:#9f7aea">${outbound.length}</div><div class="lbl">Total Outbound</div><div class="sub-num">${sent997}×997 ${sent855}×855 ${sent856}×856</div></div>
+    <div class="stat"><div class="num" style="color:#f6e05e">${sent855}</div><div class="lbl">855 PO Acks Sent</div></div>
+    <div class="stat"><div class="num" style="color:#76e4f7">${sent856}</div><div class="lbl">856 ASNs Sent</div></div>
+    <div class="stat"><div class="num" style="color:#fc8181">${failedOut}</div><div class="lbl">Delivery Failures</div></div>
+    <div class="stat"><div class="num" style="color:#68d391">${successRate}%</div><div class="lbl">Inbound Success</div></div>
+  `;
+
+  // Recent inbound
+  document.getElementById('ov-inbound').innerHTML = inbound.slice(0, 8).map(m => `
+    <tr>
+      <td>${txBadge(m.transaction_set)}</td>
+      <td style="font-size:0.8rem;">${m.partner_id || '—'}</td>
+      <td style="font-family:monospace;font-size:0.78rem;color:#a0aec0">${m.po_number || '—'}</td>
+      <td>${stBadge(m.status)}</td>
+      <td>${m.order_id ? `<a href="#" onclick="viewOrderDetail(${m.order_id})" style="color:#63b3ed">#${m.order_id}</a>` : '—'}</td>
+      <td style="font-size:0.78rem;color:#718096">${fmtDate(m.created_at)}</td>
+    </tr>`).join('') || `<tr><td colspan="6" class="empty">No inbound messages yet</td></tr>`;
+
+  // Recent outbound
+  document.getElementById('ov-outbound').innerHTML = outbound.slice(0, 8).map(m => `
+    <tr>
+      <td>${txBadge(m.transaction_set)}</td>
+      <td style="font-size:0.8rem;">${m.partner_id || '—'}</td>
+      <td>${stBadge(m.status)}</td>
+      <td style="font-size:0.78rem;color:#718096">${fmtDate(m.created_at)}</td>
+    </tr>`).join('') || `<tr><td colspan="4" class="empty">No outbound messages yet</td></tr>`;
+
+  // Order lifecycle for EDI orders
+  const ediOrders = orders.filter(o => o.channel === 'edi').slice(0, 10);
+  document.getElementById('ov-lifecycle').innerHTML = ediOrders.map(o => {
+    const getStep = (type) => {
+      const m = msgs.find(m => m.transaction_set === type && m.order_id == o.id);
+      if (!m) return `<span class="flow-step step-pending">—</span>`;
+      return `<span class="flow-step ${m.status==='sent'||m.status==='processed'?'step-done':m.status==='failed'?'step-failed':'step-waiting'}">${m.status}</span>`;
+    };
+    const recv850 = msgs.find(m => m.transaction_set==='850' && m.order_id==o.id && m.direction==='inbound');
+    return `<tr>
+      <td><a href="#" onclick="viewOrderDetail(${o.id})" style="color:#63b3ed">#${o.id}</a></td>
+      <td style="font-family:monospace;font-size:0.78rem;color:#a0aec0">${o.edi_po_number || '—'}</td>
+      <td style="font-size:0.8rem">${o.edi_partner_id || '—'}</td>
+      <td>${recv850 ? `<span class="flow-step step-done">${fmtDate(recv850.created_at)}</span>` : '<span class="flow-step step-pending">—</span>'}</td>
+      <td>${getStep('997')}</td>
+      <td>${getStep('855')}</td>
+      <td>${getStep('856')}</td>
+      <td>${getStep('810')}</td>
+      <td>${stBadge(o.status)}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="9" class="empty">No EDI-sourced orders yet</td></tr>`;
+}
+
+// ── TRANSACTIONS ─────────────────────────────────────────────
+async function loadTransactions() {
+  const dir    = document.getElementById('tx-direction').value;
+  const type   = document.getElementById('tx-type').value;
+  const status = document.getElementById('tx-status').value;
+  const partner = document.getElementById('tx-partner').value;
+
+  let url = '/edi/messages?limit=100';
+  if (dir)     url += `&direction=${dir}`;
+  if (type)    url += `&transaction_set=${type}`;
+  if (status)  url += `&status=${status}`;
+  if (partner) url += `&partner_id=${encodeURIComponent(partner)}`;
+
+  const msgs = await api(url);
+  document.getElementById('tx-body').innerHTML = msgs.map(m => `
+    <tr>
+      <td style="color:#718096;font-size:0.78rem">${m.id}</td>
+      <td>${dirBadge(m.direction)}</td>
+      <td>${txBadge(m.transaction_set)}</td>
+      <td style="font-size:0.8rem">${m.partner_id || '—'}</td>
+      <td style="font-family:monospace;font-size:0.75rem;color:#718096">${m.isa_control_no || '—'}</td>
+      <td style="font-family:monospace;font-size:0.78rem;color:#a0aec0">${m.po_number || '—'}</td>
+      <td>${stBadge(m.status)}</td>
+      <td>${m.order_id ? `<a href="#" onclick="viewOrderDetail(${m.order_id})" style="color:#63b3ed">#${m.order_id}</a>` : '—'}</td>
+      <td style="font-size:0.75rem;color:#fc8181;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.error_detail||''}">${m.error_detail ? '⚠ '+m.error_detail.substring(0,40)+'...' : ''}</td>
+      <td style="font-size:0.78rem;color:#718096">${fmtDate(m.created_at)}</td>
+      <td><button class="btn btn-ghost" style="padding:3px 8px;font-size:0.75rem" onclick="viewMessage(${m.id})">View</button></td>
+    </tr>`).join('') || `<tr><td colspan="11" class="empty">No messages found</td></tr>`;
+}
+
+// ── INBOUND ───────────────────────────────────────────────────
+async function loadInbound() {
+  const type   = document.getElementById('in-type').value;
+  const status = document.getElementById('in-status').value;
+  let url = '/edi/messages?direction=inbound&limit=100';
+  if (type)   url += `&transaction_set=${type}`;
+  if (status) url += `&status=${status}`;
+  const msgs = await api(url);
+  document.getElementById('in-body').innerHTML = msgs.map(m => `
+    <tr>
+      <td style="color:#718096;font-size:0.78rem">${m.id}</td>
+      <td>${txBadge(m.transaction_set)}</td>
+      <td style="font-size:0.8rem">${m.partner_id || '—'}</td>
+      <td style="font-family:monospace;font-size:0.78rem;color:#76e4f7">${m.po_number || '—'}</td>
+      <td style="font-family:monospace;font-size:0.75rem;color:#718096">${m.isa_control_no || '—'}</td>
+      <td>${stBadge(m.status)}</td>
+      <td>${m.order_id ? `<a href="#" onclick="viewOrderDetail(${m.order_id})" style="color:#63b3ed">#${m.order_id}</a>` : '—'}</td>
+      <td style="font-size:0.75rem;color:#fc8181">${m.error_detail ? m.error_detail.substring(0,50) : ''}</td>
+      <td style="font-size:0.78rem;color:#718096">${fmtDate(m.created_at)}</td>
+      <td><button class="btn btn-ghost" style="padding:3px 8px;font-size:0.75rem" onclick="viewMessage(${m.id})">View EDI</button></td>
+    </tr>`).join('') || `<tr><td colspan="10" class="empty">No inbound messages</td></tr>`;
+}
+
+// ── OUTBOUND ──────────────────────────────────────────────────
+async function loadOutbound() {
+  const type   = document.getElementById('out-type').value;
+  const status = document.getElementById('out-status').value;
+  let url = '/edi/messages?direction=outbound&limit=100';
+  if (type)   url += `&transaction_set=${type}`;
+  if (status) url += `&status=${status}`;
+  const msgs = await api(url);
+  document.getElementById('out-body').innerHTML = msgs.map(m => `
+    <tr>
+      <td style="color:#718096;font-size:0.78rem">${m.id}</td>
+      <td>${txBadge(m.transaction_set)}</td>
+      <td style="font-size:0.8rem">${m.partner_id || '—'}</td>
+      <td>${m.order_id ? `<a href="#" onclick="viewOrderDetail(${m.order_id})" style="color:#63b3ed">#${m.order_id}</a>` : '—'}</td>
+      <td>${stBadge(m.status)}</td>
+      <td style="font-size:0.78rem;color:${m.status==='failed'?'#fc8181':'#718096'}">${m.error_detail || (m.status==='sent'?'Delivered to callback URL':'—')}</td>
+      <td style="font-size:0.78rem;color:#718096">${fmtDate(m.processed_at || m.created_at)}</td>
+      <td><button class="btn btn-ghost" style="padding:3px 8px;font-size:0.75rem" onclick="viewMessage(${m.id})">View EDI</button></td>
+    </tr>`).join('') || `<tr><td colspan="8" class="empty">No outbound messages yet</td></tr>`;
+}
+
+// ── VIEW MESSAGE DETAIL ───────────────────────────────────────
+async function viewMessage(id) {
+  const msgs = await api(`/edi/messages?limit=200`);
+  const m = msgs.find(x => x.id === id);
+  if (!m) return;
+
+  const typeLabel = { '850':'Purchase Order','860':'PO Change','997':'Functional Ack','855':'PO Acknowledgment','856':'Ship Notice/ASN','810':'Invoice' };
+  const body = `
+    <div class="detail-row"><span class="detail-lbl">Message ID</span><span class="detail-val">${m.id}</span></div>
+    <div class="detail-row"><span class="detail-lbl">Type</span><span class="detail-val">${txBadge(m.transaction_set)} &nbsp; ${typeLabel[m.transaction_set]||''}</span></div>
+    <div class="detail-row"><span class="detail-lbl">Direction</span><span class="detail-val">${dirBadge(m.direction)}</span></div>
+    <div class="detail-row"><span class="detail-lbl">Partner</span><span class="detail-val">${m.partner_id || '—'}</span></div>
+    <div class="detail-row"><span class="detail-lbl">ISA Control</span><span class="detail-val" style="font-family:monospace">${m.isa_control_no || '—'}</span></div>
+    <div class="detail-row"><span class="detail-lbl">PO Number</span><span class="detail-val" style="font-family:monospace;color:#76e4f7">${m.po_number || '—'}</span></div>
+    <div class="detail-row"><span class="detail-lbl">Status</span><span class="detail-val">${stBadge(m.status)}</span></div>
+    <div class="detail-row"><span class="detail-lbl">Order</span><span class="detail-val">${m.order_id ? '#'+m.order_id : '—'}</span></div>
+    <div class="detail-row"><span class="detail-lbl">Received</span><span class="detail-val">${fmtDate(m.created_at)}</span></div>
+    <div class="detail-row"><span class="detail-lbl">Processed</span><span class="detail-val">${fmtDate(m.processed_at)}</span></div>
+    ${m.error_detail ? `<div class="detail-row"><span class="detail-lbl" style="color:#fc8181">Error</span><span class="detail-val" style="color:#fc8181">${m.error_detail}</span></div>` : ''}
+    <div style="margin-top:16px;">
+      <div style="font-size:0.78rem;color:#718096;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;">Raw X12 EDI</div>
+      <div class="raw-edi">${m.raw_edi ? m.raw_edi.replace(/</g,'&lt;') : 'No raw EDI stored'}</div>
+    </div>
+    ${m.parsed_json ? `
+    <div style="margin-top:12px;">
+      <div style="font-size:0.78rem;color:#718096;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;">Parsed Data</div>
+      <div class="raw-edi">${JSON.stringify(m.parsed_json, null, 2)}</div>
+    </div>` : ''}
+  `;
+  openDetailModal(`EDI ${m.transaction_set} — Message #${id}`, body);
+}
+
+async function viewOrderDetail(orderId) {
+  const o = await api(`/api/orders/${orderId}`);
+  const items = (o.items||[]).filter(Boolean);
+  const body = `
+    <div class="detail-row"><span class="detail-lbl">Order #</span><span class="detail-val">${o.id}</span></div>
+    <div class="detail-row"><span class="detail-lbl">PO Number</span><span class="detail-val" style="font-family:monospace;color:#76e4f7">${o.edi_po_number || '—'}</span></div>
+    <div class="detail-row"><span class="detail-lbl">EDI Partner</span><span class="detail-val">${o.edi_partner_id || '—'}</span></div>
+    <div class="detail-row"><span class="detail-lbl">Buyer</span><span class="detail-val">${o.buyer_name}</span></div>
+    <div class="detail-row"><span class="detail-lbl">Status</span><span class="detail-val">${stBadge(o.status)}</span></div>
+    <div class="detail-row"><span class="detail-lbl">Total</span><span class="detail-val">$${parseFloat(o.total_amount||0).toFixed(2)}</span></div>
+    <div class="detail-row"><span class="detail-lbl">DC</span><span class="detail-val">${o.dc_name||'—'}</span></div>
+    <div class="detail-row"><span class="detail-lbl">Ship To</span><span class="detail-val">${[o.shipping_city,o.shipping_state,o.shipping_zip].filter(Boolean).join(', ')||'—'}</span></div>
+    <div style="margin-top:12px;">
+      <div style="font-size:0.78rem;color:#718096;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;">Items</div>
+      <table><thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
+      <tbody>${items.map(i=>`<tr><td>${i.product_name}</td><td>${i.quantity}</td><td>$${parseFloat(i.unit_price).toFixed(2)}</td><td>$${parseFloat(i.subtotal).toFixed(2)}</td></tr>`).join('')}</tbody>
+      </table>
+    </div>
+  `;
+  openDetailModal(`Order #${orderId} — EDI Sourced`, body);
+}
+
+// ── TRADING PARTNERS ─────────────────────────────────────────
+async function loadPartners() {
+  const partners = await api('/edi/partners');
+  const msgs     = await api('/edi/messages?limit=500');
+
+  document.getElementById('partners-list').innerHTML = partners.map(p => {
+    const pMsgs = msgs.filter(m => m.partner_id === p.partner_id);
+    const inCount  = pMsgs.filter(m => m.direction==='inbound').length;
+    const outCount = pMsgs.filter(m => m.direction==='outbound').length;
+    const failCount = pMsgs.filter(m => m.status==='failed'||m.status==='rejected').length;
+    return `
+    <div class="partner-card">
+      <div class="partner-name">${p.company_name} <span style="color:#4a5568;font-size:0.78rem;font-weight:400">— ${p.partner_id}</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;font-size:0.82rem;">
+        <div><span style="color:#718096">ISA ID:</span> <span style="font-family:monospace">${p.isa_id}</span></div>
+        <div><span style="color:#718096">GS ID:</span> <span style="font-family:monospace">${p.gs_id}</span></div>
+        <div><span style="color:#718096">AS2 ID:</span> <span style="font-family:monospace">${p.as2_id||'—'}</span></div>
+        <div><span style="color:#718096">EDI Version:</span> ${p.edi_version}</div>
+        <div><span style="color:#718096">Email:</span> ${p.buyer_email||'—'}</div>
+        <div><span style="color:#718096">Callback URL:</span> <span style="font-size:0.78rem;color:#63b3ed">${p.callback_url||'<span style="color:#4a5568">Not set — manual pickup</span>'}</span></div>
+        <div><span style="color:#718096">Inbound:</span> <span style="color:#63b3ed">${inCount} messages</span></div>
+        <div><span style="color:#718096">Outbound:</span> <span style="color:#9f7aea">${outCount} messages</span></div>
+        ${failCount > 0 ? `<div><span style="color:#718096">Failures:</span> <span style="color:#fc8181">${failCount}</span></div>` : ''}
+      </div>
+    </div>`;
+  }).join('') || `<div class="empty">No trading partners registered yet.<br>Register a partner to start accepting EDI.</div>`;
+}
+
+function openAddPartner() {
+  ['p-id','p-name','p-isa','p-gs','p-as2','p-email','p-url'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  document.getElementById('modal-partner').classList.add('open');
+}
+
+async function savePartner() {
+  const body = {
+    partner_id:   document.getElementById('p-id').value.trim(),
+    company_name: document.getElementById('p-name').value.trim(),
+    isa_id:       document.getElementById('p-isa').value.trim(),
+    gs_id:        document.getElementById('p-gs').value.trim(),
+    as2_id:       document.getElementById('p-as2').value.trim(),
+    buyer_email:  document.getElementById('p-email').value.trim(),
+    callback_url: document.getElementById('p-url').value.trim(),
+  };
+  if (!body.partner_id || !body.company_name || !body.isa_id || !body.gs_id)
+    return toast('partner_id, company_name, isa_id and gs_id are required', false);
+
+  const r = await fetch(`${BASE}/edi/partners`, { method:'POST', headers:H, body:JSON.stringify(body) });
+  const d = await r.json();
+  if (!r.ok) return toast(d.error, false);
+  toast('Partner registered successfully');
+  closeModal('modal-partner');
+  loadPartners();
+}
+
+// ── SETUP GUIDE ───────────────────────────────────────────────
+async function loadGuide() {
+  const info = await api('/edi/info');
+  const ediBase = `${BASE}/edi`;
+  document.getElementById('guide-content').innerHTML = `
+    <div style="max-width:800px;">
+      <h2 style="color:#63b3ed;margin-bottom:20px;font-size:1.1rem;">EDI Integration Setup Guide</h2>
+
+      <div style="margin-bottom:24px;">
+        <h3 style="color:#a0aec0;font-size:0.88rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">Our EDI Identity</h3>
+        <div class="raw-edi">ISA Receiver ID:  ${info.our_isa_id}  (qualifier: ZZ)
+AS2 ID:           ${info.our_as2_id}
+EDI Version:      X12 ${info.edi_version}
+Segment term:     ~   Element sep: *</div>
+      </div>
+
+      <div style="margin-bottom:24px;">
+        <h3 style="color:#a0aec0;font-size:0.88rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">Inbound Endpoints</h3>
+        <div class="raw-edi">HTTPS:  POST ${info.endpoints?.https}
+        Headers: Content-Type: application/edi-x12
+                 X-API-Key: &lt;your-buyer-api-key&gt;
+
+AS2:    POST ${info.endpoints?.as2}
+        Headers: AS2-From: &lt;your-as2-id&gt;
+                 AS2-To: ${info.our_as2_id}
+                 Content-Type: application/edi-x12</div>
+      </div>
+
+      <div style="margin-bottom:24px;">
+        <h3 style="color:#a0aec0;font-size:0.88rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">Required 850 Segments</h3>
+        <table>
+          ${Object.entries(info.required_850_segments||{}).map(([seg,desc])=>`
+          <tr><td style="font-family:monospace;color:#76e4f7;width:80px;padding:8px 12px">${seg}</td><td style="font-size:0.82rem;padding:8px 12px;color:#a0aec0">${desc}</td></tr>`).join('')}
+        </table>
+      </div>
+
+      <div style="margin-bottom:24px;">
+        <h3 style="color:#a0aec0;font-size:0.88rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">Transaction Workflow</h3>
+        <div class="raw-edi">${Object.entries(info.workflow||{}).map(([k,v])=>`${k.padEnd(20)} ${v}`).join('\n')}</div>
+      </div>
+
+      <div style="margin-bottom:24px;">
+        <h3 style="color:#a0aec0;font-size:0.88rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">Minimal 850 Example</h3>
+        <div class="raw-edi">ISA*00*          *00*          *ZZ*YOURCOMPANY    *ZZ*${(info.our_isa_id||'SELLERAGENT').padEnd(15)}*230601*1200*^*00501*000000001*0*P*:~
+GS*PO*YOURCOMPANY*${info.our_isa_id||'SELLERAGENT'}*20230601*1200*1*X*005010~
+ST*850*0001~
+BEG*00*SA*PO-YOUR-001**20230601~
+N1*ST*Your Company Inc*92*YOURCO~
+N3*123 Main Street~
+N4*New York*NY*10001*US~
+PO1*1*10*EA*10.00*PE*VP*9~
+CTT*1~
+SE*9*0001~
+GE*1*1~
+IEA*1*000000001~</div>
+      </div>
+
+      <div>
+        <h3 style="color:#a0aec0;font-size:0.88rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">Supported Transactions</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div><div style="color:#68d391;margin-bottom:8px;font-size:0.82rem;font-weight:600">INBOUND (you send)</div>
+            ${(info.supported_transactions?.inbound||[]).map(t=>`<div style="padding:4px 0;font-size:0.82rem;color:#a0aec0">• ${t}</div>`).join('')}
+          </div>
+          <div><div style="color:#9f7aea;margin-bottom:8px;font-size:0.82rem;font-weight:600">OUTBOUND (we send)</div>
+            ${(info.supported_transactions?.outbound||[]).map(t=>`<div style="padding:4px 0;font-size:0.82rem;color:#a0aec0">• ${t}</div>`).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ── Auto-refresh every 30s ────────────────────────────────────
+setInterval(() => {
+  const active = document.querySelector('.tab.active')?.id?.replace('tab-','');
+  if (active === 'overview')     loadOverview();
+  if (active === 'transactions') loadTransactions();
+  if (active === 'inbound')      loadInbound();
+  if (active === 'outbound')     loadOutbound();
+}, 30000);
+
+// ── Init ──────────────────────────────────────────────────────
+loadOverview();
+</script>
+</body>
+</html>
