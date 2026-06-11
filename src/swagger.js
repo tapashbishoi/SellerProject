@@ -2,16 +2,18 @@ const swaggerSpec = {
   openapi: '3.0.0',
   info: {
     title: 'Seller Agent API',
-    version: '2.0.0',
-    description: `Order management, catalogue, inventory, DC routing, buyer profiles and AI negotiation API.
+    version: '3.0.0',
+    description: `Order management, catalogue, inventory, DC routing, buyer profiles, AI negotiation and EDI B2B integration.
 
 ## Authentication
 All \`/api/*\` endpoints require the **X-API-Key** header.
 - **Seller key** \`seller-admin-key-2025\` — full access
 - **Buyer key** \`buyer-key-001\` — read catalogue/inventory, place & track orders
 
+\`/edi/*\` endpoints also require **X-API-Key**.
+
 ## Channel Tags
-Orders are tagged by source: \`ui\` \`api\` \`mcp\` \`negotiation\`
+Orders are tagged by source: \`ui\` \`api\` \`mcp\` \`negotiation\` \`edi\`
 
 ## Order Flow
 \`POST /api/orders\` → RabbitMQ → consumer validates stock → deducts DC inventory → \`confirmed\`
@@ -175,6 +177,45 @@ Shipping state → nearest DC (US East / US West / US Central) → fulfillment`,
           confirmed:     { type: 'integer', example: 7 },
           cancelled:     { type: 'integer', example: 1 },
           revenue:       { type: 'number',  example: 680.00 },
+        },
+      },
+      EDITradingPartner: {
+        type: 'object',
+        properties: {
+          id:                { type: 'integer', example: 1 },
+          partner_id:        { type: 'string',  example: 'ACME_CORP' },
+          company_name:      { type: 'string',  example: 'Acme Corporation' },
+          isa_id:            { type: 'string',  example: 'ACMECORP' },
+          gs_id:             { type: 'string',  example: 'ACMECORP' },
+          as2_id:            { type: 'string',  example: 'ACME-AS2', nullable: true },
+          callback_url:      { type: 'string',  example: 'https://acme.com/edi/receive', nullable: true },
+          edi_version:       { type: 'string',  example: '00501' },
+          send_997:          { type: 'boolean', example: true },
+          send_855:          { type: 'boolean', example: true },
+          send_856:          { type: 'boolean', example: true },
+          send_810:          { type: 'boolean', example: false },
+          expects_ack:       { type: 'boolean', example: false },
+          ack_timeout_hours: { type: 'integer', example: 24 },
+          is_active:         { type: 'boolean', example: true },
+        },
+      },
+      EDIMessage: {
+        type: 'object',
+        properties: {
+          id:               { type: 'integer', example: 1 },
+          direction:        { type: 'string',  enum: ['inbound','outbound'] },
+          transaction_set:  { type: 'string',  enum: ['850','860','997','855','856','810'] },
+          partner_id:       { type: 'string',  example: 'ACME_CORP' },
+          isa_control_no:   { type: 'string',  example: '000000001' },
+          po_number:        { type: 'string',  example: 'PO-12345', nullable: true },
+          status:           { type: 'string',  enum: ['received','processed','sent','queued','failed','rejected','error','acknowledged'] },
+          order_id:         { type: 'integer', example: 42, nullable: true },
+          error_detail:     { type: 'string',  nullable: true },
+          ack_required:     { type: 'boolean', example: false, nullable: true },
+          ack_received_at:  { type: 'string',  format: 'date-time', nullable: true },
+          ack_isa_control:  { type: 'string',  nullable: true },
+          created_at:       { type: 'string',  format: 'date-time' },
+          processed_at:     { type: 'string',  format: 'date-time', nullable: true },
         },
       },
       Error: {
@@ -525,6 +566,176 @@ Shipping state → nearest DC (US East / US West / US Central) → fulfillment`,
           200: { description: 'Rejected order', content: { 'application/json': { schema: { $ref: '#/components/schemas/Order' } } } },
           400: { description: 'Cannot reject — invalid status or missing reason' },
           404: { description: 'Order not found' },
+        },
+      },
+    },
+
+    // ── EDI ───────────────────────────────────────────────────
+    '/edi/info': {
+      get: {
+        tags: ['EDI'],
+        summary: 'EDI setup guide — our ISA/AS2 IDs, required segments, workflow, endpoints',
+        description: 'Returns everything a trading partner needs to start sending EDI 850s. No auth required.',
+        security: [],
+        responses: {
+          200: {
+            description: 'EDI configuration and setup guide',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    our_isa_id:   { type: 'string', example: 'SELLERAGENT' },
+                    our_as2_id:   { type: 'string', example: 'SELLERAGENT-AS2' },
+                    edi_version:  { type: 'string', example: '00501' },
+                    endpoints:    { type: 'object', properties: { https: { type: 'string' }, as2: { type: 'string' } } },
+                    supported_transactions: { type: 'object' },
+                    required_850_segments:  { type: 'object' },
+                    workflow: { type: 'object' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/edi/receive': {
+      post: {
+        tags: ['EDI'],
+        summary: 'Receive inbound EDI via HTTPS — accepts 850 (Purchase Order) and 860 (PO Change)',
+        description: 'Post raw X12 EDI in the request body. Returns 202 immediately — processing is async via RabbitMQ. 997 Functional Ack sent to your registered callback_url.',
+        requestBody: {
+          required: true,
+          content: { 'application/edi-x12': { schema: { type: 'string', example: 'ISA*00*...' } } },
+        },
+        responses: {
+          202: { description: 'EDI queued for processing', content: { 'application/json': { schema: { type: 'object', properties: { edi_message_id: { type: 'integer' }, transaction_type: { type: 'string', example: '850' }, isa_control: { type: 'string' }, status: { type: 'string', example: 'queued' } } } } } },
+          400: { description: 'Invalid EDI payload' },
+          409: { description: 'Duplicate ISA control number' },
+          422: { description: 'Parse or validation error' },
+        },
+      },
+    },
+    '/edi/as2': {
+      post: {
+        tags: ['EDI'],
+        summary: 'Receive inbound EDI via AS2 transport — returns synchronous MDN',
+        description: 'Requires AS2-From and AS2-To headers. AS2-To must match our AS2 ID. Returns MDN (Message Disposition Notification) synchronously.',
+        parameters: [
+          { name: 'AS2-From', in: 'header', required: true, schema: { type: 'string' }, description: 'Your AS2 ID' },
+          { name: 'AS2-To',   in: 'header', required: true, schema: { type: 'string' }, description: 'Our AS2 ID (SELLERAGENT-AS2)' },
+          { name: 'Message-ID', in: 'header', schema: { type: 'string' }, description: 'AS2 Message ID for MDN correlation' },
+        ],
+        requestBody: { required: true, content: { 'application/edi-x12': { schema: { type: 'string' } } } },
+        responses: {
+          200: { description: 'MDN returned (check Disposition header for accepted/failed)' },
+          400: { description: 'Invalid AS2 headers or EDI payload' },
+        },
+      },
+    },
+    '/edi/status/{isa_control}': {
+      parameters: [{ name: 'isa_control', in: 'path', required: true, schema: { type: 'string' }, example: '000000001', description: 'ISA control number of the original 850' }],
+      get: {
+        tags: ['EDI'],
+        summary: 'Track an inbound 850 by ISA control number — shows 997/855/856 responses',
+        responses: {
+          200: { description: 'EDI message with order status and outbound response history' },
+          404: { description: 'ISA control number not found' },
+        },
+      },
+    },
+    '/edi/messages': {
+      get: {
+        tags: ['EDI'],
+        summary: 'EDI audit log — all inbound and outbound messages',
+        parameters: [
+          { name: 'direction',       in: 'query', schema: { type: 'string', enum: ['inbound','outbound'] } },
+          { name: 'transaction_set', in: 'query', schema: { type: 'string', enum: ['850','860','997','855','856','810'] } },
+          { name: 'status',          in: 'query', schema: { type: 'string', enum: ['received','processed','sent','queued','failed','rejected','error','acknowledged'] } },
+          { name: 'partner_id',      in: 'query', schema: { type: 'string' } },
+          { name: 'limit',           in: 'query', schema: { type: 'integer', default: 50 } },
+        ],
+        responses: { 200: { description: 'EDI message list' } },
+      },
+    },
+    '/edi/ack-pending': {
+      get: {
+        tags: ['EDI'],
+        summary: 'Outbound messages awaiting buyer 997 acknowledgment — includes overdue flag',
+        description: 'Shows all outbound 855/856/810 where ack_required=true but no 997 received back. overdue=true when hours elapsed > partner ack_timeout_hours.',
+        responses: { 200: { description: 'Pending ack list with overdue flag' } },
+      },
+    },
+    '/edi/partners': {
+      get: {
+        tags: ['EDI'],
+        summary: 'List all EDI trading partners',
+        responses: { 200: { description: 'Trading partner list' } },
+      },
+      post: {
+        tags: ['EDI'],
+        summary: 'Register or update a trading partner',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object', required: ['partner_id','company_name','isa_id','gs_id'],
+                properties: {
+                  partner_id:         { type: 'string', example: 'ACME_CORP' },
+                  company_name:       { type: 'string', example: 'Acme Corporation' },
+                  buyer_email:        { type: 'string', example: 'edi@acme.com' },
+                  isa_id:             { type: 'string', example: 'ACMECORP' },
+                  gs_id:              { type: 'string', example: 'ACMECORP' },
+                  as2_id:             { type: 'string', example: 'ACME-AS2' },
+                  callback_url:       { type: 'string', example: 'https://acme.com/edi/receive', description: 'We POST 997/855/856/810 here' },
+                  edi_version:        { type: 'string', example: '00501', default: '00501' },
+                  send_997:           { type: 'boolean', default: true,  description: 'Send 997 for their inbound 850/860' },
+                  send_855:           { type: 'boolean', default: true,  description: 'Send 855 when order confirmed' },
+                  send_856:           { type: 'boolean', default: true,  description: 'Send 856 when order shipped' },
+                  send_810:           { type: 'boolean', default: false, description: 'Send 810 invoice when delivered (opt-in)' },
+                  expects_ack:        { type: 'boolean', default: false, description: 'Do we expect 997 back from them for our outbound?' },
+                  ack_timeout_hours:  { type: 'integer', default: 24,   description: 'Hours before unacked outbound is flagged overdue' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: { description: 'Partner registered/updated' },
+          400: { description: 'Missing required fields' },
+        },
+      },
+    },
+    '/edi/partners/{id}/preferences': {
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'partner_id', example: 'ACME_CORP' }],
+      patch: {
+        tags: ['EDI'],
+        summary: 'Update delivery preferences — callback URL and which docs to send/receive/ack',
+        description: 'Buyer uses this (or the MCP configure_edi_delivery tool) to set their endpoint and opt in/out of each document type.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  callback_url:      { type: 'string', example: 'https://buyer.com/edi' },
+                  send_997:          { type: 'boolean' },
+                  send_855:          { type: 'boolean' },
+                  send_856:          { type: 'boolean' },
+                  send_810:          { type: 'boolean' },
+                  expects_ack:       { type: 'boolean', description: 'true = we will track if buyer sends 997 back for our outbound' },
+                  ack_timeout_hours: { type: 'integer' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Preferences updated' },
+          404: { description: 'Partner not found' },
         },
       },
     },

@@ -253,9 +253,15 @@ const TOOL_META = {
   negotiate_price:         { category: 'Negotiation',   color: '#9c27b0', example: { product_id: 9, proposed_price: 8.50, quantity: 50, buyer_email: 'ravi@company.com', buyer_name: 'Ravi Kumar' } },
   get_negotiation:         { category: 'Negotiation',   color: '#9c27b0', example: { negotiation_id: 1, buyer_email: 'ravi@company.com' } },
   accept_counter_offer:    { category: 'Negotiation',   color: '#9c27b0', example: { negotiation_id: 1, buyer_email: 'ravi@company.com' } },
+  configure_edi_delivery:  { category: 'EDI', color: '#00bcd4', example: { partner_id: 'ACME_CORP', callback_url: 'https://acme.com/edi/receive', wants_997: false, wants_855: true, wants_856: true, wants_810: false, will_send_997_back: true, ack_timeout_hours: 24 } },
+  acknowledge_edi:         { category: 'EDI', color: '#00bcd4', example: { isa_control_number: '000000005', partner_id: 'ACME_CORP', accepted: true } },
+  get_edi_delivery_status: { category: 'EDI', color: '#00bcd4', example: { partner_id: 'ACME_CORP', unacked_only: false } },
+  get_edi_guidelines:      { category: 'EDI', color: '#00bcd4', example: {} },
+  send_edi_850:            { category: 'EDI', color: '#00bcd4', example: { mode: 'structured', partner_id: 'ACME_CORP', po_number: 'PO-001', items: [{ product_id: 9, quantity: 10, unit_price: 9.50 }], shipping_city: 'New York', shipping_state: 'NY', shipping_zip: '10001' } },
+  check_edi_status:        { category: 'EDI', color: '#00bcd4', example: { isa_control_number: '000000001' } },
 };
 
-const CATEGORY_ORDER = ['Buyer Profile', 'Catalogue', 'Inventory', 'DC Routing', 'Orders', 'Negotiation'];
+const CATEGORY_ORDER = ['Buyer Profile', 'Catalogue', 'Inventory', 'DC Routing', 'Orders', 'Negotiation', 'EDI'];
 
 // ── Fetch tools from MCP server ───────────────────────────────
 async function fetchTools() {
