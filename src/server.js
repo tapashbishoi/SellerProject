@@ -5,7 +5,8 @@ const path = require('path');
 const initSchema = require('./schema');
 const { startConsumer }      = require('./mq/consumer');
 const { getMQStatus }        = require('./mq/connection');
-const { attachMcpToExpress } = require('./mcp/buyer-server');
+const { attachMcpToExpress }    = require('./mcp/buyer-server');
+const { attachEdiMcpToExpress } = require('./mcp/edi-server');
 const seedDCs                = require('./dc/seed');
 const { startEDIProcessor }  = require('./edi/processor');
 const { startEDISender }     = require('./edi/sender');
@@ -28,8 +29,11 @@ app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   swaggerOptions: { persistAuthorization: true, url: '/docs/spec.json' },
 }));
 
-// MCP server for buyers — mounted BEFORE api key middleware (has its own auth)
+// MCP server for buyers (catalogue, orders, negotiation) — no auth, has own key check
 attachMcpToExpress(app, '/mcp');
+
+// EDI MCP server — strictly for EDI trading partners (850/860/997/855/856/810 only)
+attachEdiMcpToExpress(app, '/edi-mcp');
 
 // ── MCP Discovery & Docs ──────────────────────────────────────
 
@@ -38,18 +42,31 @@ app.get('/.well-known/mcp.json', (req, res) => {
   const base = `${req.protocol}://${req.get('host')}`;
   res.json({
     schema_version: '1.0',
-    name:           'Seller Agent MCP Server',
-    description:    'Stationery seller — browse catalogue, check inventory, place orders, negotiate prices',
-    mcp_endpoint:   `${base}/mcp`,
-    docs_url:       `${base}/mcp-docs`,
-    tools_count:    18,
-    categories:     ['catalogue', 'inventory', 'orders', 'negotiation'],
+    name:           'Seller Agent MCP Servers',
+    description:    'Stationery seller — two MCP endpoints: buyer (catalogue/orders/negotiation) and EDI (X12 850/860/997/855/856/810)',
+    servers: [
+      {
+        name:        'Buyer MCP',
+        description: 'Browse catalogue, check inventory, place JSON orders, negotiate prices',
+        mcp_endpoint: `${base}/mcp`,
+        tools_count:  18,
+        categories:   ['catalogue', 'inventory', 'orders', 'negotiation', 'dc-routing'],
+      },
+      {
+        name:        'EDI MCP',
+        description: 'EDI trading partners only — send 850/860, receive 997/855/856/810 via X12',
+        mcp_endpoint: `${base}/edi-mcp`,
+        tools_count:  8,
+        categories:   ['edi-850', 'edi-860', 'edi-997', 'edi-855', 'edi-856', 'edi-810'],
+      },
+    ],
     auth: {
       type:        'header',
       header_name: 'X-API-Key',
-      note:        'Contact seller for a buyer API key',
+      note:        'Contact seller for an API key',
     },
-    contact: process.env.SELLER_EMAIL || '',
+    docs_url: `${base}/mcp-docs`,
+    contact:  process.env.SELLER_EMAIL || '',
   });
 });
 
