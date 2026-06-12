@@ -264,6 +264,29 @@ ${p.description ? `Description: ${p.description}` : ''}`;
     async ({ buyer_name, buyer_email, buyer_phone, notes, items,
              shipping_street, shipping_city, shipping_state, shipping_zip }) => {
 
+      // Block EDI trading partners — they must use send_850 on /edi-mcp
+      const { rows: ediPartners } = await pool.query(
+        `SELECT partner_id, company_name FROM edi_trading_partners
+         WHERE LOWER(buyer_email) = LOWER($1) AND is_active = true LIMIT 1`,
+        [buyer_email]
+      );
+      if (ediPartners.length) {
+        const p = ediPartners[0];
+        return { content: [{ type: 'text', text: `🚫 JSON orders are not available for EDI trading partners.
+
+Your account (${buyer_email}) is registered as EDI partner: ${p.company_name} (${p.partner_id}).
+
+Please place orders via EDI 850 using the EDI MCP server:
+  Endpoint : https://sellerpos.onrender.com/edi-mcp
+  Tool     : send_850()
+
+Steps:
+  1. Connect to the EDI MCP endpoint above
+  2. Call get_edi_setup() to see product IDs
+  3. Call send_850() with your purchase order
+  4. Track with get_edi_status() — we reply with 997/855/856/810` }] };
+      }
+
       // Load profile if no address given
       if (!shipping_state) {
         const profile = await getBuyerProfile(buyer_email);
